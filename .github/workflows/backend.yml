@@ -1,0 +1,36 @@
+name: Backend CI (Django)
+
+on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - 'backend-service/**'
+  pull_request:
+    branches: [ "main" ]
+    paths:
+      - 'backend-service/**'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Dependencies
+        working-directory: backend-service
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Django System Check
+        working-directory: backend-service
+        run: python manage.py check
+
+      - name: Check for Missing Migrations
+        working-directory: backend-service
+        run: python manage.py makemigrations --check

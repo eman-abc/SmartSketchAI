@@ -1,0 +1,29 @@
+name: Modal ML Deployment
+
+on:
+  push:
+    branches: [ "main", "ml-integration" ]
+    paths:
+      - 'backend-service/ml_service/**'
+      - 'backend-service/ml_engine/**'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Modal
+        run: pip install modal fastapi
+
+      - name: Deploy to Modal
+        env:
+          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+        run: |
+          modal deploy backend-service/ml_service/modal_app.py
