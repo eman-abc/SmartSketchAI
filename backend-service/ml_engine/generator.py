@@ -103,12 +103,15 @@ class FaceGenerator:
             PIL Image
         """
         # Default negative prompt for forensic realism
-        if negative_prompt is None:
-            negative_prompt = (
-                "anime, cartoon, 3d render, stylized, unrealistic, "
-                "colorful, illustration, painting, fantasy, video game, "
-                "neon, oversaturated"
-            )
+        base_negative = (
+            "anime, cartoon, 3d render, stylized, unrealistic, "
+            "colorful, illustration, painting, fantasy, video game, "
+            "neon, oversaturated"
+        )
+        if negative_prompt:
+            negative_prompt = f"{base_negative}, {negative_prompt}"
+        else:
+            negative_prompt = base_negative
         
         # Enhance prompt for forensic style
         full_prompt = f"professional forensic photograph, {prompt}, realistic, photorealistic, natural skin tones, detailed facial features"

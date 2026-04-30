@@ -189,7 +189,6 @@ class FaceEditor:
             return float(ssim(orig_gray, edit_gray))
         except:
             return 0.5 # Neutral fallback
-    
     def edit_face(
         self,
         original_image: Image.Image,
@@ -197,7 +196,9 @@ class FaceEditor:
         strength: Optional[float] = None,
         guidance_scale: Optional[float] = None,
         num_inference_steps: int = 30,
-        seed: Optional[int] = None
+        seed: Optional[int] = None,
+        negative_prompt: Optional[str] = None,
+        ip_adapter_scale: Optional[float] = None
     ) -> Dict:
         """
         Edit a face
@@ -209,6 +210,7 @@ class FaceEditor:
             guidance_scale: Prompt adherence (auto if None)
             num_inference_steps: Quality (20-50, default 30)
             seed: Random seed for reproducibility
+            negative_prompt: What to avoid (optional)
         
         Returns:
             Dictionary with:
@@ -224,7 +226,7 @@ class FaceEditor:
         edit_id = f"edit_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{random.randint(1000, 9999)}"
         timestamp = datetime.now().isoformat()
         
-        print(f"\\n{'='*60}")
+        print(f"\n{'='*60}")
         print(f"✏️  EDITING FACE")
         print(f"{'='*60}")
         print(f"🆔 Edit ID: {edit_id}")
@@ -252,11 +254,16 @@ class FaceEditor:
         # Build full prompt
         full_prompt = f"professional forensic photograph, {edit_prompt}, realistic, photorealistic, natural skin tones, detailed facial features, high quality"
         
-        negative_prompt = (
+        base_negative = (
             "low quality, blurry, distorted, deformed, disfigured, "
             "bad anatomy, extra limbs, poorly drawn face, mutation, "
             "anime, cartoon, 3d render, duplicate, multiple people"
         )
+        if negative_prompt:
+            negative_prompt = f"{base_negative}, {negative_prompt}"
+        else:
+            negative_prompt = base_negative
+
         
         # Set up generator for reproducibility
         if seed is not None:
@@ -285,6 +292,10 @@ class FaceEditor:
             kwargs = {}
             if getattr(self.pipe, 'image_encoder', None) is not None:
                 kwargs["ip_adapter_image"] = original_image
+                # Set IP-Adapter scale if provided or use default 0.6
+                current_scale = ip_adapter_scale if ip_adapter_scale is not None else 0.6
+                self.pipe.set_ip_adapter_scale(current_scale)
+                print(f"🔗 IP-Adapter scale set to {current_scale}")
                 
             edited_image = self.pipe(
                 prompt=full_prompt,
@@ -383,6 +394,57 @@ class FaceEditor:
         print(f"{'='*60}")
         
         return results
+
+    def age_edit(
+        self,
+        original_image: Image.Image,
+        years: int,
+        enhanced_prompt: Optional[str] = None,
+        **kwargs
+    ) -> Dict:
+        """
+        Perform age progression or regression
+        
+        Args:
+            original_image: PIL Image
+            years: Number of years to age (positive) or de-age (negative)
+            enhanced_prompt: Optional pre-enhanced prompt from LLM
+            **kwargs: Overrides for edit_face
+        """
+        age_direction = "older" if years > 0 else "younger"
+        abs_years = abs(years)
+        
+        # Build a specialized forensic aging prompt
+        if enhanced_prompt:
+            edit_prompt = enhanced_prompt
+        else:
+            if years > 0:
+                if abs_years < 10:
+                    keywords = "subtle age progression, fine lines around eyes"
+                elif abs_years < 25:
+                    keywords = "middle-aged, deepening facial lines, sun-damaged skin texture"
+                else:
+                    keywords = "elderly appearance, deep wrinkles, sagging skin, grey hair, age spots"
+            else:
+                keywords = "younger appearance, smooth skin, youthful facial structure, vibrant complexion"
+            
+            edit_prompt = f"same person, {abs_years} years {age_direction}, {keywords}"
+
+        print(f"[AgeEdit] Direction: {age_direction} ({abs_years} years)")
+        
+        # Apply Reformed Plan: Lower IP-Adapter scale to allow aging
+        # but keep ControlNet high (0.8) to lock bone structure.
+        # Defaults for aging:
+        strength = kwargs.pop('strength', 0.75)
+        ip_scale = kwargs.pop('ip_adapter_scale', 0.35) # REFORMED: Low scale for aging
+        
+        return self.edit_face(
+            original_image=original_image,
+            edit_prompt=edit_prompt,
+            strength=strength,
+            ip_adapter_scale=ip_scale,
+            **kwargs
+        )
 
 
 # Convenience function

@@ -91,6 +91,7 @@ class FaceInpainter:
         strength: float = 0.75,
         num_inference_steps: int = 30,
         seed: Optional[int] = None,
+        negative_prompt: Optional[str] = None,
     ) -> Dict:
         """
         Edit a specific region of the face while preserving identity.
@@ -132,10 +133,15 @@ class FaceInpainter:
             f"professional forensic photograph, {prompt}, "
             "realistic, photorealistic, natural skin tones, detailed facial features, high quality"
         )
-        negative_prompt = (
+        base_negative = (
             "low quality, blurry, distorted, deformed, disfigured, "
             "anime, cartoon, 3d render, painting, duplicate"
         )
+        if negative_prompt:
+            negative_prompt = f"{base_negative}, {negative_prompt}"
+        else:
+            negative_prompt = base_negative
+
 
         try:
             print(f"🎨 [Inpainter] Running inpainting on region: {target_region} …")

@@ -74,6 +74,11 @@ class ForensicAgentState(TypedDict):
     # NLP Semantic Routing
     user_intent: Optional[str]     # 'generate' | 'edit' | 'inpaint' | None
 
+    # AI Enhanced prompts
+    enhanced_prompt: Optional[str]
+    negative_prompt: Optional[str]
+    age_params: Optional[Dict[str, Any]]  # {"years": 10}
+
     # Routing & execution parameters (set by RouterNode)
     next_step: str                 # 'generate' | 'edit' | 'inpaint' | 'retry' | 'end'
     generation_params: Optional[Dict]  # e.g. {"target_region": "eyes", "use_controlnet": True}

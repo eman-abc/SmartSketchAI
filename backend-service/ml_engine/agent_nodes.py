@@ -43,6 +43,9 @@ class AnalyzerNode:
         updated_profile_data = self._parse_json(response.content)
 
         intent = updated_profile_data.get("intent", "edit")
+        enhanced = updated_profile_data.get("enhanced_prompt")
+        negative = updated_profile_data.get("negative_prompt")
+        age_params = updated_profile_data.get("age_params")
         profile_fields = updated_profile_data.get("profile", updated_profile_data)
 
         # Merge: keep existing fields if LLM omitted them
@@ -51,11 +54,17 @@ class AnalyzerNode:
         updated_profile = SuspectProfile(**base)
 
         print(f"[Analyzer] Profile updated: {updated_profile.model_dump_json()}")
-        print(f"[Analyzer] Semantic Intent: {intent}")
+        print(f"[Analyzer] Intent: {intent} | Enhanced: {enhanced[:40] if enhanced else None} | Negative: {negative}")
+        if age_params:
+            print(f"[Analyzer] Age Params: {age_params}")
+        
         return {
             "suspect_profile": updated_profile,
             "iteration_count": state["iteration_count"] + 1,
-            "user_intent": intent
+            "user_intent": intent,
+            "enhanced_prompt": enhanced,
+            "negative_prompt": negative,
+            "age_params": age_params
         }
 
     def _build_system_prompt(self, profile: SuspectProfile) -> str:
@@ -71,9 +80,19 @@ INSTRUCTIONS:
    - "inpaint": The user wants to surgically change a specific feature (e.g., "change his eyes to blue", "add round glasses", "make the lips fuller").
    - "generate": The user indicates the current face is completely wrong or wants to start over (e.g., "start over", "erase that", "he looks nothing like that", "make him thinner").
    - "edit": The user wants to change structural or global features (e.g., "make him look older", "add a beard").
-3. Return ONLY a valid JSON object matching this schema:
+   - "age": The user wants to specifically see the person at a different age (e.g., "what would he look like in 10 years?", "make him look like he was in his 20s").
+3. ENHANCE the prompt for SDXL:
+   - Convert the user's description into a high-quality SDXL prompt using descriptive keywords (e.g. "rough face" -> "weathered skin, deep wrinkles, rugged complexion").
+4. SMART NEGATIVE PROMPT:
+   - Identify things the user explicitly DOES NOT want (e.g. "no beard" -> add "beard, facial hair" to negative prompt).
+5. AGE PARAMETERS:
+   - If the intent is "age", extract the relative change in years (positive for older, negative for younger).
+6. Return ONLY a valid JSON object matching this schema:
 {{
-  "intent": "generate" | "edit" | "inpaint",
+  "intent": "generate" | "edit" | "inpaint" | "age",
+  "enhanced_prompt": "string",
+  "negative_prompt": "string",
+  "age_params": {{"years": number}} | null,
   "profile": {{ ... updated profile fields ... }}
 }}"""
 
@@ -160,7 +179,10 @@ INSTRUCTIONS:
 
         return {
             "suspect_profile": SuspectProfile(**data),
-            "user_intent": intent
+            "user_intent": intent,
+            "enhanced_prompt": None,
+            "negative_prompt": None,
+            "age_params": None
         }
 
 
@@ -226,7 +248,15 @@ class RouterNode:
                 "generation_params": {"target_region": None, "use_controlnet": False},
             }
 
-        # 3. Precision region triggers (LLM or Regex)
+        # 3. Age intent
+        if user_intent == "age":
+            print("[Router] Age intent detected → AGE")
+            return {
+                "next_step": "age",
+                "generation_params": {"target_region": None, "use_controlnet": True},
+            }
+
+        # 4. Precision region triggers (LLM or Regex)
         target_region = None
         if user_intent == "inpaint":
             # Find which region

@@ -61,7 +61,7 @@ class SmartSketchAgent:
         wf.add_conditional_edges(
             "route",
             lambda x: x["next_step"],
-            {"generate": "artist", "edit": "artist", "inpaint": "artist"},
+            {"generate": "artist", "edit": "artist", "inpaint": "artist", "age": "artist"},
         )
 
         wf.add_edge("artist", "verify")
@@ -100,6 +100,8 @@ class SmartSketchAgent:
                 return self._local_generate(state)
             elif action == "edit":
                 return self._local_edit(state)
+            elif action == "age":
+                return self._local_age(state)
             elif action in ("inpaint", "retry"):
                 return self._local_inpaint(state)
             else:
@@ -123,12 +125,24 @@ class SmartSketchAgent:
         profile: SuspectProfile = state.get("suspect_profile") or SuspectProfile()
         prompt = profile.to_detailed_prompt()
 
+        if action == "age":
+            try:
+                return self._call_remote_age(state)
+            except Exception as e:
+                print(f"[Artist/remote/age] {e}")
+                return None
+
         # ---- /generate ----
         if action == "generate":
             try:
                 resp = requests.post(
                     f"{self.remote_url.rstrip('/').replace('/generate','').replace('/edit','')}/generate",
-                    json={"prompt": prompt, "case_type": "criminal", "age": 30},
+                    json={
+                        "prompt": state.get("enhanced_prompt") or prompt,
+                        "negative_prompt": state.get("negative_prompt"),
+                        "case_type": "criminal",
+                        "age": 30
+                    },
                     timeout=180,
                 )
                 if resp.status_code == 200:
@@ -170,7 +184,8 @@ class SmartSketchAgent:
                 json={
                     "generation_id": state.get("generation_id", "agent"),
                     "original_image": img_b64,
-                    "edit_prompt":    edit_prompt,
+                    "edit_prompt":    state.get("enhanced_prompt") or edit_prompt,
+                    "negative_prompt": state.get("negative_prompt"),
                     "strength":       0.65,
                 },
                 timeout=180,
@@ -190,6 +205,54 @@ class SmartSketchAgent:
                     }
         except Exception as e:
             print(f"[Artist/remote/edit] {e}")
+        return None
+
+    def _call_remote_age(self, state: ForensicAgentState) -> Optional[Dict[str, Any]]:
+        """Call the /age endpoint on Modal."""
+        import base64, io as _io
+        from PIL import Image as _Image
+
+        current_image = state.get("current_image")
+        if current_image is None:
+            return None
+
+        # Encode image
+        buf = _io.BytesIO()
+        current_image.save(buf, format="PNG")
+        img_b64 = base64.b64encode(buf.getvalue()).decode()
+
+        age_params = state.get("age_params") or {"years": 10}
+
+        try:
+            base = self.remote_url.rstrip("/")
+            if base.endswith("/generate") or base.endswith("/edit") or base.endswith("/age"):
+                base = base.rsplit("/", 1)[0]
+            
+            resp = requests.post(
+                f"{base}/age",
+                json={
+                    "generation_id": state.get("generation_id", "agent"),
+                    "original_image": img_b64,
+                    "years":          age_params.get("years", 10),
+                    "prompt":         state.get("enhanced_prompt"),
+                },
+                timeout=180,
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                if data.get("success") and data.get("edited_image"):
+                    edited_bytes = base64.b64decode(data["edited_image"])
+                    pil_edited   = _Image.open(_io.BytesIO(edited_bytes)).convert("RGB")
+                    return {
+                        "current_image": pil_edited,
+                        "generation_id": data.get("edit_id", state.get("generation_id")),
+                        "generation_params": {
+                            **(state.get("generation_params") or {}),
+                            "last_identity_score": data.get("identity_score"),
+                        },
+                    }
+        except Exception as e:
+            print(f"[Artist/remote/age] {e}")
         return None
 
     # ------------------------------------------------------------------
@@ -226,7 +289,8 @@ class SmartSketchAgent:
                 age = int(nums[0])
 
         result = self.pipeline.generate_sketch(
-            prompt=prompt,
+            prompt=state.get("enhanced_prompt") or prompt,
+            negative_prompt=state.get("negative_prompt"),
             case_type="criminal",
             age=age,
             output_type="photo",
@@ -260,10 +324,41 @@ class SmartSketchAgent:
         result = self.pipeline.edit_sketch(
             generation_id=state.get("generation_id", "unknown"),
             original_image=current_image,
-            edit_prompt=edit_prompt,
+            edit_prompt=state.get("enhanced_prompt") or edit_prompt,
+            negative_prompt=state.get("negative_prompt"),
         )
         if not result.get("success"):
             return {"last_error": result.get("error", "Edit failed")}
+
+        return {
+            "current_image": self._pil_to_b64(result["edited_image"]),
+            "generation_id": result.get("edit_id", state.get("generation_id")),
+            "last_error": None,
+            "generation_params": {
+                **(state.get("generation_params") or {}),
+                "last_identity_score": result.get("identity_score"),
+            },
+        }
+
+    def _local_age(self, state: ForensicAgentState) -> Dict[str, Any]:
+        current_b64 = state.get("current_image")
+        if current_b64 is None:
+            return self._local_generate(state)
+
+        # Decode base64 → PIL for the pipeline call
+        current_image = self._b64_to_pil(current_b64)
+
+        age_params = state.get("age_params") or {"years": 10}
+        print(f"[Artist/local/age] years: {age_params.get('years')}")
+
+        result = self.pipeline.age_progression(
+            generation_id=state.get("generation_id", "unknown"),
+            original_image=current_image,
+            years=age_params.get("years", 10),
+            enhanced_prompt=state.get("enhanced_prompt")
+        )
+        if not result.get("success"):
+            return {"last_error": result.get("error", "Age progression failed")}
 
         return {
             "current_image": self._pil_to_b64(result["edited_image"]),
@@ -322,7 +417,8 @@ class SmartSketchAgent:
         result = self.pipeline.inpainting_edit(
             generation_id=state.get("generation_id", "unknown"),
             original_image=current_image,
-            edit_prompt=edit_prompt,
+            edit_prompt=state.get("enhanced_prompt") or edit_prompt,
+            negative_prompt=state.get("negative_prompt"),
             target_region=target_region,
             age=age,
         )

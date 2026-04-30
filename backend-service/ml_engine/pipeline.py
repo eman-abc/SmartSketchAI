@@ -13,6 +13,7 @@ from .scorer import FaceScorer
 from .sketch_converter import MemoryEfficientSketchConverter
 from .inpainter import FaceInpainter
 from .integrity import ForensicSigner, ForensicSafetyChecker
+from .restorer import FaceRestorer
 
 
 class SmartSketchPipeline:
@@ -29,7 +30,8 @@ class SmartSketchPipeline:
         face_editor: Optional["FaceEditor"] = None,
         face_inpainter: Optional[FaceInpainter] = None,
         forensic_signer: Optional[ForensicSigner] = None,
-        safety_checker: Optional[ForensicSafetyChecker] = None
+        safety_checker: Optional[ForensicSafetyChecker] = None,
+        face_restorer: Optional[FaceRestorer] = None
     ):
         """
         Initialize pipeline
@@ -49,6 +51,7 @@ class SmartSketchPipeline:
         self.face_inpainter = face_inpainter
         self.signer = forensic_signer or ForensicSigner()
         self.safety_checker = safety_checker
+        self.face_restorer = face_restorer
         
         print("=" * 60)
         print("READY SmartSketch Pipeline Initialized")
@@ -132,6 +135,12 @@ class SmartSketchPipeline:
                 seed=seed,
                 num_inference_steps=num_inference_steps
             )
+
+            # --- Step 2b: Face Restoration ---
+            if self.face_restorer:
+                print("[INFO] Enhancing facial features with GFPGAN...")
+                photo_image = self.face_restorer.restore(photo_image)
+
             
         except Exception as e:
             return {
@@ -322,6 +331,12 @@ class SmartSketchPipeline:
             strength=strength,
             seed=seed
         )
+
+        # --- Step 2b: Face Restoration ---
+        if result['success'] and self.face_restorer:
+            print("[INFO] Enhancing facial features with GFPGAN...")
+            result['edited_image'] = self.face_restorer.restore(result['edited_image'])
+
         
         if not result['success']:
             print(f"[!] Edit failed: {result['error']}")
@@ -406,6 +421,12 @@ class SmartSketchPipeline:
             seed=seed
         )
 
+        # --- Step 2b: Face Restoration ---
+        if result['success'] and self.face_restorer:
+            print("[INFO] Enhancing facial features with GFPGAN...")
+            result['edited_image'] = self.face_restorer.restore(result['edited_image'])
+
+
         if result['success']:
             # Step 3: Score
             scores = self.scorer.score_generation(result['edited_image'], enhanced_edit)
@@ -414,6 +435,54 @@ class SmartSketchPipeline:
 
             # Step 4: Forensic Integrity
             print("\n[SECURITY] Applying forensic integrity to inpaint...")
+            result['edited_image'] = self.signer.sign_image(result['edited_image'])
+            result['forensic_hash'] = self.signer.calculate_hash(result['edited_image'])
+            result['is_watermarked'] = True
+
+        return result
+
+    def age_progression(
+        self,
+        generation_id: str,
+        original_image: Image.Image,
+        years: int,
+        enhanced_prompt: Optional[str] = None,
+        seed: Optional[int] = None
+    ) -> Dict:
+        """
+        Perform age progression or regression
+        """
+        if self.face_editor is None:
+            return {'success': False, 'error': 'Face editor not initialized'}
+
+        print(f"\n[INFO] PERFORMING AGE { 'PROGRESSION' if years > 0 else 'REGRESSION' }")
+        print(f"📋 Original Generation ID: {generation_id}")
+        print(f"⏳ Change: {years} years")
+
+        result = self.face_editor.age_edit(
+            original_image=original_image,
+            years=years,
+            enhanced_prompt=enhanced_prompt,
+            seed=seed
+        )
+
+        # --- Face Restoration ---
+        if result['success'] and self.face_restorer:
+            print("[INFO] Enhancing facial features with GFPGAN...")
+            result['edited_image'] = self.face_restorer.restore(result['edited_image'])
+
+        if result['success']:
+            # Score
+            scores = self.scorer.score_generation(
+                image=result['edited_image'],
+                prompt=result['edit_prompt'],
+                identity_score=result.get('identity_score')
+            )
+            result['scores'] = scores
+            result['generation_id'] = generation_id
+
+            # Forensic Integrity
+            print("\n[SECURITY] Applying forensic integrity to aging result...")
             result['edited_image'] = self.signer.sign_image(result['edited_image'])
             result['forensic_hash'] = self.signer.calculate_hash(result['edited_image'])
             result['is_watermarked'] = True
@@ -432,6 +501,7 @@ class SmartSketchPipeline:
         enable_editing: bool = True,
         enable_inpainting: bool = True,
         enable_safety: bool = True,
+        enable_restoration: bool = True,
         enable_offload: bool = False
     ):
         """
@@ -500,9 +570,20 @@ class SmartSketchPipeline:
             except Exception as e:
                 print(f"[!] Could not load safety checker: {e}")
         
+        # Load face restorer
+        face_restorer = None
+        if enable_restoration:
+            try:
+                face_restorer = FaceRestorer(
+                    model_path='/models/GFPGANv1.4.pth',
+                    device=device
+                )
+            except Exception as e:
+                print(f"[!] Could not load face restorer: {e}")
+
         signer = ForensicSigner()
         
-        return cls(validator, generator, scorer, sketch_converter, face_editor, face_inpainter, signer, safety_checker)
+        return cls(validator, generator, scorer, sketch_converter, face_editor, face_inpainter, signer, safety_checker, face_restorer)
 
 
 # Convenience function

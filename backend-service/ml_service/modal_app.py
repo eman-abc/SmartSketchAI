@@ -52,11 +52,15 @@ image = (
         "pydantic>=2.0",
         "fastapi",
         "uvicorn",
+        "gfpgan",
+        "facexlib",
+        "basicsr",
     )
     .run_commands(
         "pip install git+https://github.com/openai/CLIP.git",
         "pip install facenet-pytorch --no-deps",
         "pip install mtcnn",
+        "wget https://github.com/TencentARC/GFPGAN/releases/download/v1.3.0/GFPGANv1.4.pth -P /models",
     )
     .add_local_dir(
         LOCAL_ML_ENGINE,
@@ -111,12 +115,14 @@ class SmartSketchService:
     @modal.method()
     def generate(self, body: dict) -> dict:
         prompt    = body.get("prompt", "")
+        negative  = body.get("negative_prompt")
         case_type = body.get("case_type", "criminal")
         age       = int(body.get("age", 30))
         seed      = body.get("seed")
 
         result = self.pipeline.generate_sketch(
             prompt=prompt,
+            negative_prompt=negative,
             case_type=case_type,
             age=age,
             seed=seed,
@@ -160,6 +166,7 @@ class SmartSketchService:
                 generation_id=generation_id,
                 original_image=original_image,
                 edit_prompt=edit_prompt,
+                negative_prompt=body.get("negative_prompt"),
                 strength=0.80,
                 age=age,
             )
@@ -168,6 +175,7 @@ class SmartSketchService:
                 generation_id=generation_id,
                 original_image=original_image,
                 edit_prompt=edit_prompt,
+                negative_prompt=body.get("negative_prompt"),
                 strength=strength,
             )
 
@@ -181,6 +189,40 @@ class SmartSketchService:
             "identity_score": result.get("identity_score", 0.0),
             "scores":         result.get("scores", {}),
             "route_used":     "inpaint" if use_inpaint else "controlnet",
+        }
+
+    # ─────────────────────────────────────────────────────────────────────────
+    @modal.method()
+    def age(self, body: dict) -> dict:
+        generation_id   = body.get("generation_id", "unknown")
+        original_b64    = body.get("original_image", "")
+        years           = int(body.get("years", 0))
+        enhanced_prompt = body.get("prompt") # The analyzer-enhanced age prompt
+        seed            = body.get("seed")
+
+        if not original_b64:
+            return {"success": False, "error": "original_image is required"}
+
+        original_image = _b64_to_pil(original_b64)
+
+        result = self.pipeline.age_progression(
+            generation_id=generation_id,
+            original_image=original_image,
+            years=years,
+            enhanced_prompt=enhanced_prompt,
+            seed=seed
+        )
+
+        if not result.get("success"):
+            return {"success": False, "error": result.get("error", "Age progression failed")}
+
+        return {
+            "success":        True,
+            "edited_image":   _pil_to_b64(result["edited_image"]),
+            "edit_id":        result.get("edit_id", ""),
+            "identity_score": result.get("identity_score", 0.0),
+            "scores":         result.get("scores", {}),
+            "years":          years,
         }
 
 
@@ -219,11 +261,17 @@ def fastapi_app():
         result = service.edit.remote(body)
         return JSONResponse(result)
 
+    @web_app.post("/age")
+    async def age(request: Request):
+        body   = await request.json()
+        result = service.age.remote(body)
+        return JSONResponse(result)
+
     return web_app
 
 
 # ── 8. Optional: keep-warm cron (prevents cold starts during business hours) ──
-@app.function(schedule=modal.Cron("*/15 8-22 * * 1-6"))  # every 15 min, weekdays+Sat
+# @app.function(schedule=modal.Cron("*/15 8-22 * * 1-6"))  # every 15 min, weekdays+Sat
 def keep_warm():
     """Pings the service to keep the container alive during peak hours."""
     SmartSketchService().generate.remote({

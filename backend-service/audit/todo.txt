@@ -1,0 +1,79 @@
+# SmartSketch AI - Forensic ML Roadmap (Status Updated: 2026-05-01)
+
+This breakdown tracks the implementation status of core ML features.
+
+---
+
+## 🔴 High Impact — Core Quality Improvements
+
+### 1. Face-Consistent Generation (IP-Adapter) [DONE]
+Identity is now locked using **IP-Adapter FaceID** across all generations and edits.
+- Status: Fully integrated into `generator.py` and `inpainter.py`.
+
+### 2. LoRA Fine-tuning on Forensic Sketches [PENDING]
+Fine-tuning a LoRA on real police sketch datasets for an authentic pencil-on-paper look.
+- Status: Research phase (Modal A100 training plan ready).
+
+### 3. Age Progression / Regression [DONE]
+Forensic-grade aging that preserves identity while allowing for texture/bone structure shifts.
+- **Reformed Plan (Implemented)**:
+    - **Logic**: `AnalyzerNode` extracts `years` and generates forensic age keywords.
+    - **Execution**: Lower `ip_adapter_scale` (0.35) during aging to prevent identity lock from fighting wrinkles, plus **ControlNet Canny (0.8)** for geometric stability.
+- Status: Fully implemented in `FaceEditor`, `SmartSketchPipeline`, and `SmartSketchAgent`.
+
+---
+
+## 🟡 Medium Impact — New Capabilities
+
+### 4. Reference Photo Mode [PENDING]
+Convert blurry CCTV frames or witness photos into forensic sketches while preserving identity.
+- Status: Conceptual design complete.
+
+### 5. Composite Sketch (Multiple Witnesses) [PENDING]
+Blend multiple witness descriptions using FaceNet embedding interpolation.
+- Status: In roadmap.
+
+### 6. Ethnicity & Skin Tone Control [DONE]
+Accurate demographic representation via structured LLM extraction.
+- Status: Integrated into `SuspectProfile` and `AnalyzerNode`.
+
+### 7. NLP Facial Feature Extraction [DONE]
+Gemini 1.5 Flash replaced basic regex for natural language attribute parsing.
+- Status: Deployed in `AnalyzerNode`.
+
+---
+
+## 🟢 Lower Effort — Fast Wins
+
+### 8. GFPGAN Face Restoration [DONE]
+Post-generation pass to fix blurry or distorted facial features.
+- Status: Fully integrated into `pipeline.py`.
+
+### 9. Real-Time Prompt Enhancement [DONE]
+Gemini Flash converts raw user input into optimized SDXL forensic prompts.
+- Status: Active in `AnalyzerNode`.
+
+### 10. Negative Prompt Intelligence [DONE]
+Dynamic negative prompts based on what the user explicitly excludes (e.g., "no beard").
+- Status: Active in all generation/edit passes.
+
+---
+
+## 📊 Status Matrix
+
+| Feature | Effort | Status | Impact |
+|---|---|---|---|
+| **IP-Adapter FaceID** | Medium | ✅ DONE | 🔴 Very High |
+| **Forensic LoRA** | High | ⏳ PENDING | 🔴 Very High |
+| **GFPGAN restoration** | Low | ✅ DONE | 🟡 Medium |
+| **LLM prompt enhancer** | Low | ✅ DONE | 🟡 Medium |
+| **Age progression** | Low | ✅ DONE | 🟡 Medium |
+| **NLP attribute extractor**| Medium | ✅ DONE | 🟡 Medium |
+| **Negative Intelligence** | Low | ✅ DONE | 🟡 Medium |
+
+---
+
+## Recommended Immediate Next Steps
+1.  **Implement `age_edit`**: Finish the Reformed Aging Plan in the ML Engine.
+2.  **Forensic Integrity Suite**: Implement Hashing and Watermarking (Security requirement).
+3.  **Asynchronous Queue**: Move inference to Celery to prevent UI timeouts.
