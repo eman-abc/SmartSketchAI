@@ -1,0 +1,26 @@
+services:
+  # The Django Backend Web Service
+  - type: web
+    name: smartsketch-api
+    env: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: smartsketch-db
+          property: connectionString
+      - key: DEBUG
+        value: "False"
+      - key: SECRET_KEY
+        generateValue: true
+      - key: PORT
+        value: "10000"
+      # Add COLAB_ML_URL manually in the Render dashboard later!
+
+databases:
+  # The Managed PostgreSQL Database
+  - name: smartsketch-db
+    databaseName: smartsketch
+    user: smartsketch_user
+    plan: free # Free tier database
