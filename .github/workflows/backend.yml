@@ -34,3 +34,24 @@ jobs:
       - name: Check for Missing Migrations
         working-directory: backend-service
         run: python manage.py makemigrations --check
+
+  verify-deployment:
+    needs: [test]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wait for Render Deployment & Ping Health Check
+        run: |
+          echo "Waiting for Render to build and deploy... (Checking every 30s for 5 mins)"
+          URL="https://smartsketch-api.onrender.com/api/health/"
+          for i in {1..10}; do
+            RESPONSE=$(curl -s -w "%{http_code}" "$URL" -o /dev/null)
+            if [ "$RESPONSE" == "200" ]; then
+              echo "✅ Deployment Verified! API is live and Database is connected."
+              exit 0
+            fi
+            echo "Attempt $i: API not ready yet (Status $RESPONSE). Retrying in 30s..."
+            sleep 30
+          done
+          echo "❌ Deployment verification timed out or failed."
+          exit 1

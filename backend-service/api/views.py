@@ -10,6 +10,7 @@ from rest_framework import generics, permissions, status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+from django.db import connection
 from rest_framework.views import APIView
 
 from .models import User, GeneratedImage, EditedImage, ImageScore, AuditLog, ForensicRequest, Conversation
@@ -707,3 +708,26 @@ def export_report_view(request):
     except Exception as e:
         import traceback; traceback.print_exc()
         return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+# ---------------------------------------------------------------------------
+# Health Check (Smoke Test)
+# ---------------------------------------------------------------------------
+@api_view(['GET'])
+@permission_classes([permissions.AllowAny])
+def health_check(request):
+    """
+    Returns 200 OK if the API and Database are healthy.
+    """
+    health = {
+        "status": "healthy",
+        "timestamp": timezone.now().isoformat(),
+        "database": "connected"
+    }
+    try:
+        connection.ensure_connection()
+    except Exception as e:
+        health["status"] = "unhealthy"
+        health["database"] = f"error: {str(e)}"
+        return Response(health, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+
+    return Response(health, status=status.HTTP_200_OK)
