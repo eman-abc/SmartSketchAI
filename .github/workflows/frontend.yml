@@ -30,3 +30,28 @@ jobs:
       - name: Type Check & Build
         working-directory: frontend-app/frontend
         run: npm run build
+
+  verify-deployment:
+    needs: [typecheck]
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/frontend')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wait for Vercel Deployment & Ping Site
+        run: |
+          echo "Waiting for Vercel to build and deploy... (Checking every 30s for 5 mins)"
+          URL="https://smart-sketch-ai-idrj.vercel.app/"
+          for i in {1..10}; do
+            RESPONSE=$(curl -s -L -w "%{http_code}" "$URL" -o body.html)
+            if [ "$RESPONSE" == "200" ]; then
+              if grep -qi "SmartSketch" body.html; then
+                echo "✅ Deployment Verified! Frontend is live and showing the app."
+                exit 0
+              else
+                echo "⚠️ Site is live (200), but could not find 'SmartSketch' in HTML. Retrying..."
+              fi
+            fi
+            echo "Attempt $i: Site not ready or showing error (Status $RESPONSE). Retrying in 30s..."
+            sleep 30
+          done
+          echo "❌ Deployment verification timed out or failed."
+          exit 1

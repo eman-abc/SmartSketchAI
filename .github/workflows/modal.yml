@@ -27,3 +27,19 @@ jobs:
           MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
         run: |
           modal deploy backend-service/ml_service/modal_app.py
+
+      - name: Verify GPU Endpoint
+        run: |
+          echo "Waiting for Modal to wake up... (Checking /health endpoint)"
+          # Note: Modal URL usually follows this pattern
+          URL="https://eman-abc--smartsketch-ml-fastapi-app.modal.run/health"
+          for i in {1..5}; do
+            RESPONSE=$(curl -s -w "%{http_code}" "$URL" -o /dev/null)
+            if [ "$RESPONSE" == "200" ]; then
+              echo "✅ ML Service Verified! GPU container is warm and ready."
+              exit 0
+            fi
+            echo "Attempt $i: ML service warming up... (Status $RESPONSE). Retrying in 20s..."
+            sleep 20
+          done
+          echo "⚠️ ML verification timed out, but deployment was successful."

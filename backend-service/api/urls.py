@@ -4,7 +4,7 @@ from .views import (
     RegisterView, ProfileView, MyGeneratedImagesView, AuditLogListView,
     ForensicRequestCreateView, ForensicApproveView,
     generate_forensic_sketch, edit_forensic_sketch, agent_chat,
-    sketch_style_view, export_report_view,
+    sketch_style_view, export_report_view, health_check,
 )
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
@@ -22,5 +22,6 @@ urlpatterns = [
     path("forensic/chat/", agent_chat),
     path("forensic/sketch-style/", sketch_style_view, name="sketch_style"),
     path("forensic/export-report/", export_report_view, name="export_report"),
+    path("health/", health_check, name="health_check"),
 ]
 
