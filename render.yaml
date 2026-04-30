@@ -3,8 +3,8 @@ services:
   - type: web
     name: smartsketch-api
     env: docker
-    dockerfilePath: ./Dockerfile
-    rootDir: backend-service
+    dockerfilePath: backend-service/Dockerfile
+    # rootDir: backend-service
     plan: starter # Starter plan recommended for enough RAM, but free can work for testing
     envVars:
       - key: DATABASE_URL
