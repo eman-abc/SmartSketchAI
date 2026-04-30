@@ -55,6 +55,15 @@ class FaceGenerator:
             self.pipe.load_lora_weights(lora_path, adapter_name="forensic")
             self.pipe.set_adapters("forensic", adapter_weights=[lora_strength])
             print(f"✅ LoRA loaded (strength: {lora_strength})")
+            
+        # Load IP-Adapter for face consistency
+        print("📥 Loading IP-Adapter FaceID...")
+        try:
+            self.pipe.load_ip_adapter("h94/IP-Adapter", subfolder="sdxl_models", weight_name="ip-adapter_sdxl.bin")
+            self.pipe.set_ip_adapter_scale(0.6)
+            print("✅ IP-Adapter loaded successfully")
+        except Exception as e:
+            print(f"⚠️ IP-Adapter failed to load: {e}")
         
         # Move to device
         if enable_offload and device == "cuda":
@@ -75,7 +84,8 @@ class FaceGenerator:
         num_inference_steps: int = 30,
         guidance_scale: float = 7.5,
         width: int = 1024,
-        height: int = 1024
+        height: int = 1024,
+        reference_image: Optional[Image.Image] = None
     ) -> Image.Image:
         """
         Generate a face from text description
@@ -110,6 +120,10 @@ class FaceGenerator:
             generator = None
         
         # Generate
+        kwargs = {}
+        if reference_image is not None:
+            kwargs["ip_adapter_image"] = reference_image
+            
         image = self.pipe(
             prompt=full_prompt,
             negative_prompt=negative_prompt,
@@ -117,7 +131,8 @@ class FaceGenerator:
             guidance_scale=guidance_scale,
             generator=generator,
             width=width,
-            height=height
+            height=height,
+            **kwargs
         ).images[0]
         
         return image

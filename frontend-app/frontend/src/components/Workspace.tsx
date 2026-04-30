@@ -101,14 +101,20 @@ export default function Workspace({ onGenerateResult, selectedImage }: Workspace
     try {
       const res = await agentChat({ message: trimmed, thread_id: SESSION_THREAD_ID });
 
+      let aiText = 'Profile updated — keep describing the suspect to generate the sketch.';
+      if (res.last_error) {
+        aiText = `⚠️ ${res.last_error}`;
+      } else if (res.image_url) {
+        if (res.next_step === 'generate') {
+          aiText = 'Generated a new face matching the profile. Keep refining or describe a new feature.';
+        } else {
+          aiText = 'Sketch updated. Keep refining or describe a new feature.';
+        }
+      }
       const aiMsg: ChatMessage = {
         id: `a_${Date.now()}`,
         role: 'assistant',
-        text: res.last_error
-          ? `⚠️ ${res.last_error}`
-          : res.image_url
-            ? 'Sketch ready. Keep refining or describe a new feature.'
-            : 'Profile updated — keep describing the suspect to generate the sketch.',
+        text: aiText,
         image_url: res.image_url ?? null,
         score: res.last_score ?? null,
         generation_id: res.generation_id ?? null,
@@ -287,6 +293,21 @@ export default function Workspace({ onGenerateResult, selectedImage }: Workspace
 
       {/* Input bar */}
       <div className="border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-4">
+        {messages.length > 0 && !loading && (
+          <div className="max-w-2xl mx-auto flex justify-end mb-2">
+            <button
+              onClick={(e) => {
+                e.preventDefault();
+                setInput("That's the wrong person, start over and generate a new face.");
+                setTimeout(() => handleSend(e), 0);
+              }}
+              className="text-xs flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-full transition-colors border border-gray-200 dark:border-gray-700"
+              title="Discard current face identity and regenerate from profile"
+            >
+              <span>🔄</span> Reroll Face
+            </button>
+          </div>
+        )}
         <form onSubmit={handleSend} className="max-w-2xl mx-auto flex gap-3 items-end">
           <textarea
             ref={textareaRef}

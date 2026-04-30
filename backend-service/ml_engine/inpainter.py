@@ -47,6 +47,15 @@ class FaceInpainter:
             use_safetensors=True,
         )
 
+        # Load IP-Adapter for face consistency in inpainting
+        print("📥 Loading IP-Adapter FaceID for inpainting...")
+        try:
+            self.pipe.load_ip_adapter("h94/IP-Adapter", subfolder="sdxl_models", weight_name="ip-adapter_sdxl.bin")
+            self.pipe.set_ip_adapter_scale(0.6)
+            print("✅ IP-Adapter loaded successfully")
+        except Exception as e:
+            print(f"⚠️ IP-Adapter failed to load: {e}")
+
         if enable_offload and device == "cuda":
             print("  - Enabling Model CPU Offload & VAE optimisations for Inpainter")
             self.pipe.enable_model_cpu_offload()
@@ -130,6 +139,10 @@ class FaceInpainter:
 
         try:
             print(f"🎨 [Inpainter] Running inpainting on region: {target_region} …")
+            kwargs = {}
+            if getattr(self.pipe, 'image_encoder', None) is not None:
+                kwargs["ip_adapter_image"] = image
+
             result_image = self.pipe(
                 prompt=full_prompt,
                 negative_prompt=negative_prompt,
@@ -138,6 +151,7 @@ class FaceInpainter:
                 strength=strength,
                 num_inference_steps=num_inference_steps,
                 generator=generator,
+                **kwargs
             ).images[0]
 
             # Measure identity preservation

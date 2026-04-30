@@ -42,30 +42,40 @@ class AnalyzerNode:
         ])
         updated_profile_data = self._parse_json(response.content)
 
+        intent = updated_profile_data.get("intent", "edit")
+        profile_fields = updated_profile_data.get("profile", updated_profile_data)
+
         # Merge: keep existing fields if LLM omitted them
         base = current_profile.model_dump()
-        base.update({k: v for k, v in updated_profile_data.items() if v is not None})
+        base.update({k: v for k, v in profile_fields.items() if v is not None and k in base})
         updated_profile = SuspectProfile(**base)
 
         print(f"[Analyzer] Profile updated: {updated_profile.model_dump_json()}")
+        print(f"[Analyzer] Semantic Intent: {intent}")
         return {
             "suspect_profile": updated_profile,
             "iteration_count": state["iteration_count"] + 1,
+            "user_intent": intent
         }
 
     def _build_system_prompt(self, profile: SuspectProfile) -> str:
-        return f"""You are a Forensic Profile Manager. Update a suspect's description based on user feedback.
+        return f"""You are a Forensic Profile Manager and Semantic Router.
+Analyze the user's message and the current suspect profile.
 
 CURRENT PROFILE (JSON):
 {profile.model_dump_json()}
 
 INSTRUCTIONS:
-1. Read the user's input carefully.
-2. Update only the relevant fields.
-3. Keep all unchanged fields exactly as-is.
-4. Return ONLY the updated JSON object — no explanation.
-
-OUTPUT FORMAT: Match the SuspectProfile schema exactly."""
+1. Extract any facial attributes mentioned in the user's message and update the profile. Handle metaphors naturally (e.g. "face like a football" -> face_shape: "round").
+2. Determine the user's INTENT from the following options:
+   - "inpaint": The user wants to surgically change a specific feature (e.g., "change his eyes to blue", "add round glasses", "make the lips fuller").
+   - "generate": The user indicates the current face is completely wrong or wants to start over (e.g., "start over", "erase that", "he looks nothing like that", "make him thinner").
+   - "edit": The user wants to change structural or global features (e.g., "make him look older", "add a beard").
+3. Return ONLY a valid JSON object matching this schema:
+{{
+  "intent": "generate" | "edit" | "inpaint",
+  "profile": {{ ... updated profile fields ... }}
+}}"""
 
     def _parse_json(self, text: str) -> Dict[str, Any]:
         try:
@@ -141,7 +151,17 @@ OUTPUT FORMAT: Match the SuspectProfile schema exactly."""
         if "scar" in msg and "scar" not in data["distinctive_features"]:
             data["distinctive_features"].append("scar")
 
-        return {"suspect_profile": SuspectProfile(**data)}
+        # --- Semantic Intent (Mock) ---
+        intent = "edit"
+        if any(w in msg for w in ["start over", "completely wrong", "wrong person", "restart"]):
+            intent = "generate"
+        elif any(w in msg for w in ["eye", "lip", "mouth", "nose", "brow", "glasses", "spectacles"]):
+            intent = "inpaint"
+
+        return {
+            "suspect_profile": SuspectProfile(**data),
+            "user_intent": intent
+        }
 
 
 # ---------------------------------------------------------------------------
@@ -166,6 +186,12 @@ class RouterNode:
         "brows": ["brow", "eyebrow"],
     }
 
+    # Keywords that indicate the base identity is wrong and needs a fresh generation
+    REGENERATE_TRIGGERS = [
+        "start over", "completely wrong", "wrong person", "restart", 
+        "different person", "not him", "not her", "regenerate", "looks nothing like"
+    ]
+
     def __call__(self, state: ForensicAgentState) -> Dict[str, Any]:
         print("\n--- ROUTING TO ML TOOL ---")
 
@@ -183,12 +209,40 @@ class RouterNode:
         last_msg = state["messages"][-1]
         msg_text = (last_msg.content if hasattr(last_msg, "content") else str(last_msg)).lower()
 
-        # Check for precision region triggers
+        # 1. Hardware/UI bypass for immediate regeneration
+        if msg_text == "[system_action: regenerate]":
+            print("[Router] UI action detected → GENERATE (Resetting Identity)")
+            return {
+                "next_step": "generate",
+                "generation_params": {"target_region": None, "use_controlnet": False},
+            }
+
+        # 2. LLM Semantic Routing
+        user_intent = state.get("user_intent")
+        if user_intent == "generate" or any(kw in msg_text for kw in self.REGENERATE_TRIGGERS):
+            print("[Router] 'Wrong person' intent detected → GENERATE (Resetting Identity)")
+            return {
+                "next_step": "generate",
+                "generation_params": {"target_region": None, "use_controlnet": False},
+            }
+
+        # 3. Precision region triggers (LLM or Regex)
         target_region = None
-        for region, keywords in self.INPAINT_TRIGGERS.items():
-            if any(kw in msg_text for kw in keywords):
-                target_region = region
-                break
+        if user_intent == "inpaint":
+            # Find which region
+            for region, keywords in self.INPAINT_TRIGGERS.items():
+                if any(kw in msg_text for kw in keywords):
+                    target_region = region
+                    break
+            if not target_region:
+                target_region = "face" # fallback if LLM said inpaint but didn't specify region
+        else:
+            # Fallback regex for inpaint
+            for region, keywords in self.INPAINT_TRIGGERS.items():
+                if any(kw in msg_text for kw in keywords):
+                    target_region = region
+                    user_intent = "inpaint"
+                    break
 
         if target_region:
             print(f"[Router] Precision region detected → INPAINT  (region={target_region})")

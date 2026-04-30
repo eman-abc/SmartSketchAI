@@ -71,6 +71,9 @@ class ForensicAgentState(TypedDict):
     current_image: Optional[Any]   # PIL Image object
     generation_id: Optional[str]
 
+    # NLP Semantic Routing
+    user_intent: Optional[str]     # 'generate' | 'edit' | 'inpaint' | None
+
     # Routing & execution parameters (set by RouterNode)
     next_step: str                 # 'generate' | 'edit' | 'inpaint' | 'retry' | 'end'
     generation_params: Optional[Dict]  # e.g. {"target_region": "eyes", "use_controlnet": True}

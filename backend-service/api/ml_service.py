@@ -115,7 +115,29 @@ class MLService:
         # Lightweight import — no torch/diffusers at module level
         from ml_engine.agent import SmartSketchAgent
 
+        # Set up Gemini LLM if API key is available
+        llm = None
+        gemini_api_key = getattr(settings, "GEMINI_API_KEY", None) or ml_config.get("GEMINI_API_KEY")
+        if not gemini_api_key:
+            import os
+            gemini_api_key = os.environ.get("GEMINI_API_KEY")
+            
+        if gemini_api_key:
+            try:
+                from langchain_google_genai import ChatGoogleGenerativeAI
+                print("[MLService] Initialising Gemini 1.5 Flash for Semantic Routing...")
+                llm = ChatGoogleGenerativeAI(
+                    model="gemini-1.5-flash",
+                    google_api_key=gemini_api_key,
+                    temperature=0.0
+                )
+            except ImportError:
+                print("[MLService] langchain-google-genai not installed. Falling back to mock LLM routing.")
+            except Exception as e:
+                print(f"[MLService] Failed to load Gemini LLM: {e}. Falling back to mock LLM routing.")
+
         cls._agent = SmartSketchAgent(
+            llm=llm,
             pipeline=local_pipeline,
             remote_url=remote_url or None,
         )

@@ -64,7 +64,9 @@ class FaceEditor:
                 tokenizer_2=base_pipeline.tokenizer_2,
                 unet=base_pipeline.unet,
                 scheduler=base_pipeline.scheduler,
-                controlnet=self.controlnet
+                controlnet=self.controlnet,
+                image_encoder=getattr(base_pipeline, 'image_encoder', None),
+                feature_extractor=getattr(base_pipeline, 'feature_extractor', None)
             )
         else:
             print("  - Loading new SDXL ControlNet Img2Img pipeline...")
@@ -280,6 +282,10 @@ class FaceEditor:
             canny_image = Image.fromarray(canny_rgb)
 
             # 2. Generate edited image (num_images_per_prompt=1 ensures single output)
+            kwargs = {}
+            if getattr(self.pipe, 'image_encoder', None) is not None:
+                kwargs["ip_adapter_image"] = original_image
+                
             edited_image = self.pipe(
                 prompt=full_prompt,
                 negative_prompt=negative_prompt,
@@ -290,7 +296,8 @@ class FaceEditor:
                 guidance_scale=guidance_scale,
                 controlnet_conditioning_scale=0.8,  # Lock structure by 80%
                 num_images_per_prompt=1,             # Guarantee single output image
-                generator=generator
+                generator=generator,
+                **kwargs
             ).images[0]
             
             print("✅ Edit complete!")
