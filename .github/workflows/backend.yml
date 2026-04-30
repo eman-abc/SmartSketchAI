@@ -1,6 +1,7 @@
 name: Backend CI (Django)
 
 on:
+  workflow_dispatch:
   push:
     branches: [ "main" ]
     paths:
