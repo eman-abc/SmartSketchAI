@@ -7,13 +7,13 @@ This package is imported by the Django process on Render (CPU-only).
 Heavy dependencies (torch, diffusers, transformers, clip, facenet, mediapipe)
 must NEVER be imported at module load time here.
 
-All GPU-heavy work runs exclusively on the Colab notebook.
+All GPU-heavy work runs exclusively on the remote Modal ML service.
 Django only imports lightweight agent/state/persistence modules.
 """
 
 # ---------------------------------------------------------------------------
 # Mediapipe compatibility shim
-# Applied lazily when the masker module is actually used (Colab side).
+# Applied lazily when the masker module is actually used by the remote ML service.
 # We still register the shim here so imports inside masker.py don't fail
 # on environments where mediapipe is absent or partially installed.
 # ---------------------------------------------------------------------------

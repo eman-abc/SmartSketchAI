@@ -132,7 +132,7 @@ export default function RightPanel({
     value >= 70 ? 'bg-success' : value >= 55 ? 'bg-warning' : 'bg-muted/35';
 
   return (
-    <div className="flex w-[22rem] shrink-0 flex-col gap-6 overflow-y-auto rounded-3xl border border-studio bg-panel/90 p-6 shadow-panel backdrop-blur-md animate-fade-in">
+    <div className="flex h-full w-[22rem] shrink-0 flex-col gap-6 overflow-y-auto rounded-3xl border border-studio bg-panel/90 p-6 shadow-panel backdrop-blur-md animate-fade-in">
       <div className="glass-card p-5 transition duration-200 ease-out hover:-translate-y-1">
         <div className="mb-4 flex items-center justify-between border-b border-studio pb-3">
           <h2 className="text-[11px] font-semibold uppercase tracking-[0.2em] text-muted">Sketch preview</h2>
@@ -149,9 +149,8 @@ export default function RightPanel({
                 <img
                   src={currentImage}
                   alt="Forensic sketch"
-                  className={`absolute inset-0 h-full w-full object-contain transition duration-300 ${
-                    styleLoading ? 'opacity-35 blur-[1px]' : 'opacity-100'
-                  }`}
+                  className={`absolute inset-0 h-full w-full object-contain transition duration-300 ${styleLoading ? 'opacity-35 blur-[1px]' : 'opacity-100'
+                    }`}
                 />
                 <span className="absolute left-3 top-3 rounded-full bg-slate-950/70 px-3 py-1 text-xs font-medium text-slate-200 backdrop-blur-sm">
                   {styleLoading ? 'Processing…' : 'Preview ready'}
@@ -187,11 +186,10 @@ export default function RightPanel({
                   type="button"
                   onClick={() => handleStyleChange(style)}
                   disabled={styleLoading}
-                  className={`flex-1 rounded-2xl border py-2 text-xs font-semibold transition duration-200 ${
-                    activeStyle === style
+                  className={`flex-1 rounded-2xl border py-2 text-xs font-semibold transition duration-200 ${activeStyle === style
                       ? 'border-brand/45 bg-brand/15 text-brand shadow-soft-glow'
                       : 'border-studio bg-panel/80 text-muted hover:border-brand/30 hover:text-text-high'
-                  } disabled:pointer-events-none disabled:opacity-40`}
+                    } disabled:pointer-events-none disabled:opacity-40`}
                 >
                   {STYLE_LABELS[style]}
                 </button>
@@ -265,14 +263,12 @@ export default function RightPanel({
           <div className="space-y-3 text-xs leading-relaxed text-muted">
             <div className="flex items-center justify-between gap-2">
               <span
-                className={`inline-flex items-center gap-1.5 font-semibold ${
-                  criticReport.decision === 'revise' ? 'text-warning' : 'text-success'
-                }`}
+                className={`inline-flex items-center gap-1.5 font-semibold ${criticReport.decision === 'revise' ? 'text-warning' : 'text-success'
+                  }`}
               >
                 <span
-                  className={`h-2 w-2 shrink-0 rounded-full ${
-                    criticReport.decision === 'revise' ? 'bg-warning' : 'bg-success'
-                  }`}
+                  className={`h-2 w-2 shrink-0 rounded-full ${criticReport.decision === 'revise' ? 'bg-warning' : 'bg-success'
+                    }`}
                 />
                 {criticReport.decision === 'revise' ? 'Revision suggested' : 'Accepted'}
               </span>
@@ -307,9 +303,8 @@ export default function RightPanel({
                   <p className="text-[11px] text-muted">{hint}</p>
                 </div>
                 <span
-                  className={`font-mono text-sm font-semibold ${
-                    value >= 70 ? 'text-success' : value >= 55 ? 'text-warning' : 'text-muted'
-                  }`}
+                  className={`font-mono text-sm font-semibold ${value >= 70 ? 'text-success' : value >= 55 ? 'text-warning' : 'text-muted'
+                    }`}
                 >
                   {hasGenerate || hasEdit ? `${value}%` : '—'}
                 </span>

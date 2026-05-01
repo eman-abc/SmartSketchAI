@@ -85,7 +85,7 @@ class SmartSketchAgent:
         action = state.get("next_step", "generate")
         print(f"\n--- ML ARTIST: {action.upper()} ---")
 
-        # ---- Remote Colab path (primary when remote_url is set) ----
+        # ---- Remote Modal path (primary when remote_url is set) ----
         if self.remote_url:
             result = self._call_remote(state, action)
             if result is not None:
@@ -113,12 +113,12 @@ class SmartSketchAgent:
             return {"last_error": str(e)}
 
     # ------------------------------------------------------------------
-    # Remote (Colab Flask) call
+    # Remote (Modal ML service) call
     # ------------------------------------------------------------------
 
     def _call_remote(self, state: ForensicAgentState, action: str) -> Optional[Dict[str, Any]]:
         """
-        Send a request to the Colab Flask server.
+        Send a request to the Modal ML service.
         Returns a state-update dict or None on failure.
         """
         import base64, io as _io
@@ -165,7 +165,7 @@ class SmartSketchAgent:
                 print(f"[Artist/remote/generate] {e}")
             return None
 
-        # ---- /edit or /inpaint (both hit /edit on Colab) ----
+        # ---- /edit or /inpaint (both hit /edit on the remote Modal service) ----
         current_image = state.get("current_image")
         if current_image is None:
             return None

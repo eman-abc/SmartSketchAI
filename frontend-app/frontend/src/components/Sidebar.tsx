@@ -53,12 +53,12 @@ function Sidebar({ onSelectImage }: SidebarProps) {
     setLoading(true);
     fetchUserImages()
       .then((data: GenerateResult[]) => setHistory(Array.isArray(data) ? data : []))
-      .catch(() => {})
+      .catch(() => { })
       .finally(() => setLoading(false));
   }, [isAuthenticated]);
 
   return (
-    <aside className="flex w-[17.5rem] shrink-0 flex-col gap-6 overflow-hidden rounded-3xl border border-studio bg-panel/95 p-6 shadow-panel backdrop-blur-sm animate-fade-in">
+    <aside className="flex h-full w-[17.5rem] shrink-0 flex-col gap-6 overflow-hidden rounded-3xl border border-studio bg-panel/95 p-6 shadow-panel backdrop-blur-sm animate-fade-in">
       <div className="min-h-0 flex-1 flex flex-col rounded-2xl border border-white/[0.08] bg-surface/50 p-4">
         <div className="mb-4 flex items-center justify-between gap-2 border-b border-studio pb-3">
           <h2 className="text-[11px] font-semibold uppercase tracking-[0.2em] text-muted">Session artifacts</h2>

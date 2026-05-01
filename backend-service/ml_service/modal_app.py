@@ -1,7 +1,7 @@
 """
 SmartSketch ML Service — Modal.com Serverless Deployment
 Exposes /generate and /edit as persistent HTTPS endpoints,
-fully compatible with Django's COLAB_ML_URL env var pattern.
+and is compatible with Django's COLAB_ML_URL / REMOTE_ML_URL env var patterns.
 
 Deploy:
     pip install modal
@@ -10,6 +10,7 @@ Deploy:
 
 Set in Render env vars:
     COLAB_ML_URL=<url printed by modal deploy>
+    REMOTE_ML_URL=<same URL, optional override>
 """
 
 import io
@@ -507,7 +508,7 @@ def _parse_critic_json(text: str) -> dict:
     return data
 
 
-# ── 7. FastAPI ASGI endpoint (replaces Colab Flask server) ───────────────────
+# ── 7. FastAPI ASGI endpoint (replaces the legacy Colab Flask server) ───────────────────
 @app.function()
 @modal.asgi_app()
 def fastapi_app():

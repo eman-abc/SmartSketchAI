@@ -4,11 +4,11 @@ api/ml_service.py  —  Django-side ML Service
 Architecture
 ============
 ALL heavy GPU work (SDXL, Qwen, CLIP, FaceNet, ControlNet, inpainting)
-runs exclusively on the Colab notebook.
+runs exclusively on the remote Modal ML service.
 
 Django (Render) is CPU-only and acts as an API gateway:
-  - generate / edit views  → HTTP POST to Colab Flask (/generate, /edit)
-  - agent_chat view        → LangGraph agent whose _artist_node calls Colab
+  - generate / edit views  → HTTP POST to the Modal ML service (/generate, /edit)
+  - agent_chat view        → LangGraph agent whose _artist_node calls Modal
 
 Nothing in this file loads torch models.  `get_pipeline()` is intentionally
 disabled unless USE_LOCAL_ML=True (for local GPU development only).
@@ -23,7 +23,7 @@ class MLService:
 
     On Render (production):
         get_pipeline() raises RuntimeError   – no heavy models loaded
-        get_agent()    returns a lightweight agent wired to the Colab URL
+        get_agent()    returns a lightweight agent wired to the Modal URL
 
     Locally with a GPU:
         Set USE_LOCAL_ML=True in .env to enable the full local pipeline.
@@ -47,7 +47,7 @@ class MLService:
         if not ml_config.get("USE_LOCAL_ML", False):
             raise RuntimeError(
                 "Local ML engine is disabled (USE_LOCAL_ML=False). "
-                "All inference runs on the Colab notebook."
+                "All inference runs on the remote Modal ML service."
             )
 
         if cls._pipeline is None:
@@ -79,7 +79,7 @@ class MLService:
         return cls._pipeline
 
     # ------------------------------------------------------------------
-    # Agent  (always lightweight — routes inference to Colab)
+    # Agent  (always lightweight — routes inference to the remote Modal service)
     # ------------------------------------------------------------------
 
     @classmethod
@@ -89,7 +89,7 @@ class MLService:
 
         In remote mode (USE_LOCAL_ML=False, default on Render):
           - No heavy models are loaded.
-          - _artist_node calls the Colab Flask server via HTTP.
+          - _artist_node calls the Modal ML service via HTTP.
           - VerificationNode skips CLIP scoring (scorer=None → pass-through).
 
         In local GPU mode (USE_LOCAL_ML=True):
@@ -125,6 +125,6 @@ class MLService:
             remote_url=remote_url or None,
         )
 
-        mode = "local GPU" if local_pipeline else f"remote Colab ({remote_url or 'URL not set!'})"
+        mode = "local GPU" if local_pipeline else f"remote Modal ({remote_url or 'URL not set!'})"
         print(f"[MLService] Agent ready in {mode} mode.")
         return cls._agent

@@ -253,7 +253,7 @@ export default function Workspace({
   };
 
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 animate-fade-in flex-col overflow-hidden rounded-3xl bg-surface shadow-panel ring-1 ring-white/10">
+    <div className="flex min-h-0 h-full min-w-0 flex-1 animate-fade-in flex-col overflow-hidden rounded-3xl bg-surface shadow-panel ring-1 ring-white/10">
       {progress > 0 && (
         <div className="h-0.5 w-full shrink-0 bg-panel">
           <div
@@ -317,11 +317,10 @@ export default function Workspace({
 
               <div className="w-full max-w-md">
                 <div
-                  className={`rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${
-                    msg.role === 'user'
+                  className={`rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${msg.role === 'user'
                       ? 'ml-auto w-fit max-w-full bg-brand font-medium text-slate-950 rounded-tr-md shadow-soft-glow'
                       : 'border border-studio bg-panel text-text-high rounded-tl-md'
-                  }`}
+                    }`}
                 >
                   {msg.text}
                 </div>
@@ -344,9 +343,8 @@ export default function Workspace({
                       {msg.score != null && (
                         <div className="flex items-center gap-2 border-t border-studio bg-panel/80 px-3 py-2 text-xs text-muted">
                           <div
-                            className={`h-2 w-2 shrink-0 rounded-full ${
-                              msg.score >= 70 ? 'bg-success' : msg.score >= 55 ? 'bg-warning' : 'bg-danger'
-                            }`}
+                            className={`h-2 w-2 shrink-0 rounded-full ${msg.score >= 70 ? 'bg-success' : msg.score >= 55 ? 'bg-warning' : 'bg-danger'
+                              }`}
                           />
                           <span>
                             Quality:{' '}
@@ -361,9 +359,8 @@ export default function Workspace({
                         <div className="border-t border-studio px-3 py-2 text-xs leading-relaxed text-muted">
                           <div className="mb-1 flex items-center gap-2">
                             <span
-                              className={`h-2 w-2 shrink-0 rounded-full ${
-                                msg.critic_report.decision === 'revise' ? 'bg-warning' : 'bg-success'
-                              }`}
+                              className={`h-2 w-2 shrink-0 rounded-full ${msg.critic_report.decision === 'revise' ? 'bg-warning' : 'bg-success'
+                                }`}
                             />
                             <span className="font-semibold text-text-high">
                               Critic{' '}

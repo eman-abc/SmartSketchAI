@@ -23,7 +23,7 @@ from .serializers import (
 from .ml_service import MLService
 from django.conf import settings
 
-COLAB_ML_URL = settings.COLAB_ML_URL
+REMOTE_ML_URL = settings.ML_CONFIG.get('REMOTE_ML_URL') or settings.COLAB_ML_URL
 
 def pil_to_content_file(image, filename):
     buffer = io.BytesIO()
@@ -41,10 +41,10 @@ def normalize_ml_base_url(url):
 
 def call_remote_critic(image_b64, prompt, suspect_profile=None, route_used="generate", scores=None, metadata=None):
     ml_config = getattr(settings, 'ML_CONFIG', {})
-    if not ml_config.get('ENABLE_FORENSIC_CRITIC', True) or not COLAB_ML_URL:
+    if not ml_config.get('ENABLE_FORENSIC_CRITIC', True) or not REMOTE_ML_URL:
         return None
 
-    base = normalize_ml_base_url(COLAB_ML_URL)
+    base = normalize_ml_base_url(REMOTE_ML_URL)
     try:
         resp = requests.post(
             f"{base}/critic",
@@ -176,12 +176,12 @@ def generate_forensic_sketch(request):
         age = 30  # Default age
 
     # ================================================================
-    # 1. Try Colab ML Service First (Primary)
+    # 1. Try remote Modal ML Service first (Primary)
     # ================================================================
-    if COLAB_ML_URL:
+    if REMOTE_ML_URL:
         # Strip any path suffix (e.g. /generate) so we always get the bare base URL,
         # then append the correct route.  Works regardless of what the user pasted in .env.
-        _base = normalize_ml_base_url(COLAB_ML_URL)
+        _base = normalize_ml_base_url(REMOTE_ML_URL)
         ml_url = f"{_base}/generate"
         try:
             ml_resp = requests.post(
@@ -209,7 +209,7 @@ def generate_forensic_sketch(request):
                             image_file=image_file,
                             generation_id=generation_id,
                             seed=ml_data.get("metadata", {}).get("seed"),
-                            model_version=ml_data.get("metadata", {}).get("model_version", "colab-v1"),
+                            model_version=ml_data.get("metadata", {}).get("model_version", "modal-v1"),
                             forensic_hash=ml_data.get("forensic_hash"),
                             is_watermarked=ml_data.get("is_watermarked", False),
                         )
@@ -249,13 +249,13 @@ def generate_forensic_sketch(request):
                                 "forensic_hash": ml_data.get("forensic_hash"),
                                 "is_watermarked": ml_data.get("is_watermarked", False),
                                 "critic_report": critic_report,
-                                "provider": "colab"
+                                "provider": "modal"
                             },
                             status=status.HTTP_200_OK,
                         )
-            print(f"⚠️ Colab ML service returned status {ml_resp.status_code}")
-        except Exception as colab_e:
-            print(f"⚠️ Colab ML service failed: {colab_e}")
+            print(f"⚠️ Remote ML service returned status {ml_resp.status_code}")
+        except Exception as remote_e:
+            print(f"⚠️ Remote ML service failed: {remote_e}")
 
     # ================================================================
     # 2. Try Local ML Engine as Fallback (if enabled)
@@ -323,7 +323,7 @@ def generate_forensic_sketch(request):
             print(f"⚠️ Local ML Engine failed: {local_e}")
 
     return Response(
-        {"error": "ML generation failed. Colab service unavailable and local ML disabled/failed."},
+        {"error": "ML generation failed. Remote ML service unavailable and local ML disabled/failed."},
         status=status.HTTP_503_SERVICE_UNAVAILABLE
     )
 
@@ -354,10 +354,10 @@ def edit_forensic_sketch(request):
         return Response({"error": "Original image not found"}, status=status.HTTP_404_NOT_FOUND)
 
     # ================================================================
-    # 1. Try Colab ML Service First (Primary)
+    # 1. Try remote Modal ML Service first (Primary)
     # ================================================================
-    if COLAB_ML_URL:
-        _base = normalize_ml_base_url(COLAB_ML_URL)
+    if REMOTE_ML_URL:
+        _base = normalize_ml_base_url(REMOTE_ML_URL)
         ml_url = f"{_base}/edit"
         try:
             with generated_image.image_file.open('rb') as f:
@@ -434,12 +434,12 @@ def edit_forensic_sketch(request):
                                 "is_watermarked": ml_data.get("is_watermarked", False),
                                 "critic_report": critic_report,
                                 "edit_id": edit_id,
-                                "provider": "colab"
+                                "provider": "modal"
                             },
                             status=status.HTTP_200_OK,
                         )
-        except Exception as colab_e:
-            print(f"⚠️ Colab ML edit failed: {colab_e}")
+        except Exception as remote_e:
+            print(f"⚠️ Modal ML edit failed: {remote_e}")
 
     # ================================================================
     # 2. Try Local ML Engine as Fallback (if enabled)
@@ -513,7 +513,7 @@ def edit_forensic_sketch(request):
             print(f"⚠️ Local ML edit failed: {local_e}")
 
     return Response(
-        {"error": "ML edit failed. Colab service unavailable and local ML disabled/failed."},
+        {"error": "ML edit failed. Remote ML service unavailable and local ML disabled/failed."},
         status=status.HTTP_503_SERVICE_UNAVAILABLE
     )
 
@@ -537,9 +537,9 @@ def age_forensic_sketch(request):
     except GeneratedImage.DoesNotExist:
         return Response({"error": "Original image not found"}, status=status.HTTP_404_NOT_FOUND)
 
-    # 1. Try Colab/Modal
-    if COLAB_ML_URL:
-        _base = normalize_ml_base_url(COLAB_ML_URL)
+    # 1. Try remote Modal ML Service first
+    if REMOTE_ML_URL:
+        _base = normalize_ml_base_url(REMOTE_ML_URL)
         ml_url = f"{_base}/age"
         try:
             with generated_image.image_file.open('rb') as f:
@@ -606,10 +606,10 @@ def age_forensic_sketch(request):
                             "is_watermarked": ml_data.get("is_watermarked", False),
                             "critic_report": critic_report,
                             "edit_id": edit_id,
-                            "provider": "colab"
+                            "provider": "modal"
                         }, status=status.HTTP_200_OK)
-        except Exception as colab_e:
-            print(f"⚠️ Colab ML age failed: {colab_e}")
+        except Exception as remote_e:
+            print(f"⚠️ Modal ML age failed: {remote_e}")
 
     # 2. Try Local Fallback
     ml_config = getattr(settings, 'ML_CONFIG', {})
@@ -657,7 +657,7 @@ def age_forensic_sketch(request):
             print(f"⚠️ Local ML age failed: {local_e}")
 
     return Response(
-        {"error": "ML age failed. Colab service unavailable and local ML disabled/failed."},
+        {"error": "ML age failed. Remote ML service unavailable and local ML disabled/failed."},
         status=status.HTTP_503_SERVICE_UNAVAILABLE
     )
 

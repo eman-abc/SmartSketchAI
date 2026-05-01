@@ -57,7 +57,7 @@
 - **Errors:**
   - **400** – `prompt` missing or invalid, or ML error: `{ "error": "..." }`
   - **403** – Not allowed (only role `forensic` or admin)
-  - **500** – `{ "error": "COLAB_ML_URL is not configured on the server" }`
+  - **500** – `{ "error": "Remote ML service URL is not configured on the server" }`
   - **502** – ML service unreachable or bad response: `{ "error": "..." }`
 
 ---

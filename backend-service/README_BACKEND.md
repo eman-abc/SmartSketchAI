@@ -17,7 +17,7 @@ Django REST API with JWT auth and forensic sketch generation.
    ```
 
 2. **Environment**
-   - Copy `.env.example` to `.env` and set `COLAB_ML_URL` if you use the generate endpoint (Colab ML service URL).
+   - Copy `.env.example` to `.env` and set `COLAB_ML_URL` if you use the generate endpoint (remote Modal ML service URL).
    - Without `COLAB_ML_URL`, other endpoints (register, login, profile, etc.) still work; `/api/forensic/generate/` will need this URL.
 
 3. **Database**
@@ -36,5 +36,5 @@ Django REST API with JWT auth and forensic sketch generation.
 - `POST /api/register/` – register
 - `POST /api/token/` – login (get JWT)
 - `POST /api/token/refresh/` – refresh JWT
-- `POST /api/forensic/generate/` – generate sketch (requires `COLAB_ML_URL` in `.env`)
+- `POST /api/forensic/generate/` – generate sketch (requires `COLAB_ML_URL` in `.env` pointing at the remote Modal ML service)
 - See `API_INTEGRATION_SPEC.md` for full list and request/response shapes.

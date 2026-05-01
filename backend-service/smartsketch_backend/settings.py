@@ -19,22 +19,22 @@ import dj_database_url
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-# Load .env so COLAB_ML_URL is available (fallback if manage.py load_dotenv ran first)
+# Load .env so COLAB_ML_URL / REMOTE_ML_URL are available (fallback if manage.py load_dotenv ran first)
 from dotenv import load_dotenv
 load_dotenv(str(BASE_DIR / ".env"))
 
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / "media"
 
-# Colab ML service – set in .env as COLAB_ML_URL=https://xxxx.ngrok-free.app/generate
-# Django uses this URL to call the Colab Flask server for ALL heavy ML work.
+# Remote Modal ML service – set in .env as COLAB_ML_URL=https://xxxx.modal.run/generate
+# Django uses this URL to call the remote ML service for ALL heavy ML work.
 COLAB_ML_URL = (os.environ.get("COLAB_ML_URL") or "").strip().rstrip("/")
 
 # ML Engine Configuration
 # ---------------------------------------------------------------
 # GPU Architecture:
 #   ALL heavy model inference (SDXL, Qwen, CLIP, FaceNet, ControlNet)
-#   runs on the Colab notebook (GPU).  Django (Render) is CPU-only
+#   runs on the remote Modal ML service. Django (Render) is CPU-only
 #   and acts purely as an API gateway.
 #
 #   USE_LOCAL_ML must remain False on Render.
@@ -56,6 +56,7 @@ ML_CONFIG = {
     'CRITIC_MODEL': os.environ.get('SMARTSKETCH_CRITIC_MODEL', 'Qwen/Qwen2.5-VL-3B-Instruct'),
     'CRITIC_MAX_RETRIES': int(os.environ.get('SMARTSKETCH_CRITIC_MAX_RETRIES', '2')),
     # Remote ML URL: defaults to COLAB_ML_URL so only one env var is needed
+    # Use REMOTE_ML_URL to override the Modal endpoint if desired.
     'REMOTE_ML_URL': (
         os.environ.get('REMOTE_ML_URL') or COLAB_ML_URL or ''
     ).strip().rstrip('/'),
