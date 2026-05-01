@@ -25,7 +25,7 @@
 - **Risk:** `gpu="T4"` (16GB) is too tight. SDXL FP16 (~8GB) + Qwen 2.5-3B (~6GB) + ControlNet/IP-Adapter/GFPGAN/CLIP (~3GB) = ~17GB total. A single inpaint or concurrent request triggers an **OOM crash**.
 - **Fix (Option A — Recommended):** Upgrade to `gpu="L4"` (24GB).
 - **Fix (Option B — Budget):** Add `torch.cuda.empty_cache()` between agent nodes.
-fixing rn
+
 ---
 
 ### 1.3 `[FRONTEND]` Prevent "White Screen of Death" — `frontend/src/main.tsx`
@@ -139,7 +139,7 @@ if __name__ == "__main__":
 - **Feature:** A Gemini 1.5 Flash Vision loop that inspects the generated image and provides reasoning for further adjustments.
 - **Tech Pattern:** SDXL generates → Gemini Vision analyzes → Agent verifies or re-generates.
 - **Academic Link:** Advanced AI Orchestration, Multi-Modal Feedback Loops.
-adding rn
+ADDED
 ---
 
 ### 6.3 `[FRONTEND]` Voice Investigator — Multimodal Input
@@ -192,7 +192,7 @@ adding rn
 
 - [ ] `[BACKEND]` `pickle` fully replaced with `json` in `persistence.py`
 - [ ] `[ML]` GPU upgraded to `L4` or `empty_cache()` added between nodes
-- [ ] `[FRONTEND]` `GlobalErrorBoundary` wrapping app root
+- [x] `[FRONTEND]` `GlobalErrorBoundary` wrapping app root
 - [ ] `[BACKEND]` Self-healing JSON parser live in `agent_nodes.py`
 - [ ] `[BACKEND]` Async `httpx` calls replacing blocking `requests.post`
 - [ ] `[BACKEND]` SSE streaming endpoint in `views.py`
