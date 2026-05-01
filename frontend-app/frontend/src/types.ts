@@ -1,3 +1,15 @@
+export interface CriticReport {
+  decision?: 'accept' | 'revise' | string;
+  score?: number | null;
+  issues?: string[];
+  matched_features?: string[];
+  missing_features?: string[];
+  prompt_adjustment?: string;
+  safety_flags?: string[];
+  reasoning_summary?: string;
+  model?: string;
+}
+
 /**
  * Response from POST /api/forensic/generate/
  */
@@ -13,6 +25,7 @@ export interface GenerateResult {
   metadata: Record<string, unknown>;
   generation_id: string;
   forensic_hash?: string;
+  critic_report?: CriticReport | null;
 }
 
 /**
@@ -41,6 +54,7 @@ export interface EditResult {
   };
   metadata: Record<string, unknown>;
   edit_id: string;
+  critic_report?: CriticReport | null;
 }
 
 /**

@@ -19,6 +19,7 @@ class GeneratedImage(models.Model):
     user = models.ForeignKey('User', on_delete=models.CASCADE, related_name='generated_images', null=True, blank=True)
     prompt = models.TextField()
     image_file = models.ImageField(upload_to='generated/', null=True, blank=True)
+    generation_id = models.CharField(max_length=255, blank=True, null=True, db_index=True)
     seed = models.BigIntegerField(null=True, blank=True)
     model_version = models.CharField(max_length=50, blank=True)
     forensic_hash = models.CharField(max_length=64, blank=True, null=True, help_text="SHA-256 hash of the pixel data")
@@ -43,6 +44,21 @@ class ImageScore(models.Model):
     clip_score = models.FloatField(null=True, blank=True)
     identity_score = models.FloatField(null=True, blank=True)
     final_score = models.FloatField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+class ForensicCritique(models.Model):
+    image = models.ForeignKey(GeneratedImage, on_delete=models.CASCADE, related_name='critiques', null=True, blank=True)
+    edited_image = models.ForeignKey(EditedImage, on_delete=models.CASCADE, related_name='critiques', null=True, blank=True)
+    model_name = models.CharField(max_length=255, blank=True)
+    decision = models.CharField(max_length=20, default='accept')
+    score = models.FloatField(null=True, blank=True)
+    issues = models.JSONField(default=list, blank=True)
+    matched_features = models.JSONField(default=list, blank=True)
+    missing_features = models.JSONField(default=list, blank=True)
+    prompt_adjustment = models.TextField(blank=True)
+    safety_flags = models.JSONField(default=list, blank=True)
+    reasoning_summary = models.TextField(blank=True)
+    raw_report = models.JSONField(default=dict, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
 class AuditLog(models.Model):

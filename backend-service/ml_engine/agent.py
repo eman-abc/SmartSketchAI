@@ -13,6 +13,7 @@ from langgraph.graph import StateGraph, END
 
 from .agent_state import ForensicAgentState, SuspectProfile
 from .agent_nodes import AnalyzerNode, RouterNode, VerificationNode
+from .critic import ForensicCriticClient
 from .persistence import DjangoCheckpointer
 
 
@@ -45,7 +46,8 @@ class SmartSketchAgent:
         self.analyzer = AnalyzerNode(llm=llm, remote_url=remote_url)
         self.router   = RouterNode()
         self.verifier = VerificationNode(
-            scorer=pipeline.scorer if pipeline else None
+            scorer=pipeline.scorer if pipeline else None,
+            critic_client=ForensicCriticClient(remote_url=remote_url),
         )
 
         # Graph
@@ -153,6 +155,7 @@ class SmartSketchAgent:
                         return {
                             "current_image": pil_img,
                             "generation_id": data.get("generation_id"),
+                            "critic_report": data.get("critic_report"),
                             "generation_params": {
                                 **(state.get("generation_params") or {}),
                                 "last_identity_score": None,
@@ -168,10 +171,16 @@ class SmartSketchAgent:
             return None
 
         last_msg = state["messages"][-1]
-        edit_prompt = last_msg.content if hasattr(last_msg, "content") else str(last_msg)
+        edit_prompt = (
+            state.get("critic_adjustment_prompt")
+            or state.get("enhanced_prompt")
+            or (last_msg.content if hasattr(last_msg, "content") else str(last_msg))
+        )
 
         # Encode image
         buf = _io.BytesIO()
+        if isinstance(current_image, str):
+            current_image = self._b64_to_pil(current_image)
         current_image.save(buf, format="PNG")
         img_b64 = base64.b64encode(buf.getvalue()).decode()
 
@@ -184,7 +193,7 @@ class SmartSketchAgent:
                 json={
                     "generation_id": state.get("generation_id", "agent"),
                     "original_image": img_b64,
-                    "edit_prompt":    state.get("enhanced_prompt") or edit_prompt,
+                    "edit_prompt":    edit_prompt,
                     "negative_prompt": state.get("negative_prompt"),
                     "strength":       0.65,
                 },
@@ -198,6 +207,7 @@ class SmartSketchAgent:
                     return {
                         "current_image": pil_edited,
                         "generation_id": data.get("edit_id", state.get("generation_id")),
+                        "critic_report": data.get("critic_report"),
                         "generation_params": {
                             **(state.get("generation_params") or {}),
                             "last_identity_score": data.get("identity_score"),
@@ -218,6 +228,8 @@ class SmartSketchAgent:
 
         # Encode image
         buf = _io.BytesIO()
+        if isinstance(current_image, str):
+            current_image = self._b64_to_pil(current_image)
         current_image.save(buf, format="PNG")
         img_b64 = base64.b64encode(buf.getvalue()).decode()
 
@@ -246,6 +258,7 @@ class SmartSketchAgent:
                     return {
                         "current_image": pil_edited,
                         "generation_id": data.get("edit_id", state.get("generation_id")),
+                        "critic_report": data.get("critic_report"),
                         "generation_params": {
                             **(state.get("generation_params") or {}),
                             "last_identity_score": data.get("identity_score"),
@@ -289,7 +302,7 @@ class SmartSketchAgent:
                 age = int(nums[0])
 
         result = self.pipeline.generate_sketch(
-            prompt=state.get("enhanced_prompt") or prompt,
+            prompt=state.get("critic_adjustment_prompt") or state.get("enhanced_prompt") or prompt,
             negative_prompt=state.get("negative_prompt"),
             case_type="criminal",
             age=age,
@@ -319,12 +332,13 @@ class SmartSketchAgent:
 
         last_msg = state["messages"][-1]
         edit_prompt = last_msg.content if hasattr(last_msg, "content") else str(last_msg)
+        edit_prompt = state.get("critic_adjustment_prompt") or state.get("enhanced_prompt") or edit_prompt
         print(f"[Artist/local/edit] prompt: {edit_prompt}")
 
         result = self.pipeline.edit_sketch(
             generation_id=state.get("generation_id", "unknown"),
             original_image=current_image,
-            edit_prompt=state.get("enhanced_prompt") or edit_prompt,
+            edit_prompt=edit_prompt,
             negative_prompt=state.get("negative_prompt"),
         )
         if not result.get("success"):
@@ -355,7 +369,7 @@ class SmartSketchAgent:
             generation_id=state.get("generation_id", "unknown"),
             original_image=current_image,
             years=age_params.get("years", 10),
-            enhanced_prompt=state.get("enhanced_prompt")
+            enhanced_prompt=state.get("critic_adjustment_prompt") or state.get("enhanced_prompt")
         )
         if not result.get("success"):
             return {"last_error": result.get("error", "Age progression failed")}
@@ -417,7 +431,7 @@ class SmartSketchAgent:
         result = self.pipeline.inpainting_edit(
             generation_id=state.get("generation_id", "unknown"),
             original_image=current_image,
-            edit_prompt=state.get("enhanced_prompt") or edit_prompt,
+            edit_prompt=state.get("critic_adjustment_prompt") or state.get("enhanced_prompt") or edit_prompt,
             negative_prompt=state.get("negative_prompt"),
             target_region=target_region,
             age=age,
@@ -457,5 +471,9 @@ class SmartSketchAgent:
             inputs["is_verified"]       = False
             inputs["last_score"]        = None
             inputs["last_error"]        = None
+            inputs["critic_report"]     = None
+            inputs["critic_adjustment_prompt"] = None
+            inputs["critic_attempts"]   = 0
+            inputs["verification_history"] = []
 
         return self.app.invoke(inputs, config)

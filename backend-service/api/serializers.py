@@ -1,6 +1,6 @@
 # api/serializers.py
 from rest_framework import serializers
-from .models import User, GeneratedImage, EditedImage, ImageScore, AuditLog, ForensicRequest
+from .models import User, GeneratedImage, EditedImage, ImageScore, AuditLog, ForensicRequest, ForensicCritique
 from django.contrib.auth.password_validation import validate_password
 
 class UserSerializer(serializers.ModelSerializer):
@@ -28,6 +28,12 @@ class RegisterSerializer(serializers.ModelSerializer):
 
 class GeneratedImageSerializer(serializers.ModelSerializer):
     user = UserSerializer(read_only=True)
+    critic_report = serializers.SerializerMethodField()
+
+    def get_critic_report(self, obj):
+        critique = obj.critiques.order_by('-created_at').first()
+        return critique.raw_report if critique else None
+
     class Meta:
         model = GeneratedImage
         fields = '__all__'
@@ -51,4 +57,10 @@ class AuditLogSerializer(serializers.ModelSerializer):
 class ForensicRequestSerializer(serializers.ModelSerializer):
     class Meta:
         model = ForensicRequest
+        fields = '__all__'
+
+
+class ForensicCritiqueSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ForensicCritique
         fields = '__all__'

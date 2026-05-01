@@ -86,6 +86,10 @@ class ForensicAgentState(TypedDict):
     # Verification results (set by VerificationNode)
     is_verified: bool
     last_score: Optional[float]    # combined quality score from last verification pass
+    critic_report: Optional[Dict[str, Any]]
+    critic_adjustment_prompt: Optional[str]
+    critic_attempts: int
+    verification_history: Optional[List[Dict[str, Any]]]
 
     # Error tracking
     last_error: Optional[str]

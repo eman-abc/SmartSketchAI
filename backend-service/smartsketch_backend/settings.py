@@ -52,6 +52,9 @@ ML_CONFIG = {
     # Never load heavy models on Render; set USE_LOCAL_ML=True only with a local GPU
     'USE_LOCAL_ML': os.environ.get('USE_LOCAL_ML', 'False').lower() == 'true',
     'LOW_VRAM_MODE': os.environ.get('LOW_VRAM_MODE', 'False').lower() == 'true',
+    'ENABLE_FORENSIC_CRITIC': os.environ.get('SMARTSKETCH_ENABLE_FORENSIC_CRITIC', 'True').lower() == 'true',
+    'CRITIC_MODEL': os.environ.get('SMARTSKETCH_CRITIC_MODEL', 'Qwen/Qwen2.5-VL-3B-Instruct'),
+    'CRITIC_MAX_RETRIES': int(os.environ.get('SMARTSKETCH_CRITIC_MAX_RETRIES', '2')),
     # Remote ML URL: defaults to COLAB_ML_URL so only one env var is needed
     'REMOTE_ML_URL': (
         os.environ.get('REMOTE_ML_URL') or COLAB_ML_URL or ''

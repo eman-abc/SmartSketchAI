@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { agentChat } from '../lib/api';
-import type { GenerateResult } from '../types';
+import type { CriticReport, GenerateResult } from '../types';
 
 // Stable session thread ID — one conversation per browser tab
 const SESSION_THREAD_ID = `session_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
@@ -23,6 +23,7 @@ type ChatMessage = {
   generation_id?: string | null;
   image_id?: number | null;
   suspect_profile?: Record<string, unknown> | null;
+  critic_report?: CriticReport | null;
 };
 
 type WorkspaceProps = {
@@ -61,6 +62,7 @@ export default function Workspace({ onGenerateResult, selectedImage }: Workspace
       text: `Loaded from history: "${selectedImage.prompt}"`,
       image_url: selectedImage.image_url,
       generation_id: selectedImage.generation_id,
+      critic_report: selectedImage.critic_report ?? null,
     }]);
     onGenerateResult?.(selectedImage, selectedImage.prompt);
   }, [selectedImage]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -120,6 +122,7 @@ export default function Workspace({ onGenerateResult, selectedImage }: Workspace
         generation_id: res.generation_id ?? null,
         image_id: res.image_id ?? null,
         suspect_profile: res.suspect_profile ?? null,
+        critic_report: res.critic_report ?? null,
       };
       setMessages(prev => [...prev, aiMsg]);
 
@@ -130,6 +133,7 @@ export default function Workspace({ onGenerateResult, selectedImage }: Workspace
           prompt: trimmed,
           generation_id: res.generation_id,
           forensic_hash: res.forensic_hash,
+          critic_report: res.critic_report ?? null,
           scores: { combined_score: res.last_score, identity_score: res.identity_score },
           metadata: res.suspect_profile,
         }, trimmed);
@@ -239,6 +243,24 @@ export default function Workspace({ onGenerateResult, selectedImage }: Workspace
                         }`} />
                         <span>Quality: <strong className="text-gray-900 dark:text-white">{msg.score.toFixed(1)}/100</strong></span>
                         <span className="ml-auto font-mono text-gray-400 dark:text-gray-500 truncate">{msg.generation_id}</span>
+                      </div>
+                    )}
+                    {msg.critic_report?.reasoning_summary && (
+                      <div className="border-t border-gray-200 dark:border-gray-700 px-3 py-2 bg-white dark:bg-gray-900 text-xs text-gray-600 dark:text-gray-300">
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className={`w-2 h-2 rounded-full ${msg.critic_report.decision === 'revise' ? 'bg-yellow-500' : 'bg-green-500'}`} />
+                          <span className="font-semibold">
+                            Critic {msg.critic_report.decision === 'revise' ? 'requested refinement' : 'accepted output'}
+                          </span>
+                          {msg.critic_report.score != null && (
+                            <span className="ml-auto text-gray-400 dark:text-gray-500">
+                              {Math.round(msg.critic_report.score)}/100
+                            </span>
+                          )}
+                        </div>
+                        <p className="leading-relaxed text-gray-500 dark:text-gray-400">
+                          {msg.critic_report.reasoning_summary}
+                        </p>
                       </div>
                     )}
                   </div>

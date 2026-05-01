@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { GenerateResult, EditResult } from '../types';
+import type { CriticReport, GenerateResult, EditResult } from '../types';
 import { convertSketchStyle, exportForensicReport, ageForensicSketch } from '../lib/api';
 
 type RightPanelProps = {
@@ -56,6 +56,7 @@ export default function RightPanel({
   const displayPrompt = hasEdit ? editResult?.edit_prompt : prompt;
   const auditId = hasEdit ? editResult?.edit_id : generateResult?.generation_id;
   const imageId = hasEdit ? editResult?.id : generateResult?.id;
+  const criticReport = (hasEdit ? editResult?.critic_report : generateResult?.critic_report) as CriticReport | null | undefined;
 
   // ── Sketch style toggle ─────────────────────────────────────────────────
   const handleStyleChange = async (style: SketchStyle) => {
@@ -234,6 +235,31 @@ export default function RightPanel({
                   </>
                 )}
               </button>
+            </div>
+          </div>
+        )}
+
+        {/* Critic Notes */}
+        {criticReport?.reasoning_summary && (
+          <div>
+            <h2 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">Critic Notes</h2>
+            <div className="bg-white dark:bg-gray-900 rounded-lg p-4 border border-gray-200 dark:border-gray-700 space-y-3 text-xs">
+              <div className="flex items-center justify-between gap-2">
+                <span className={`inline-flex items-center gap-1.5 font-semibold ${criticReport.decision === 'revise' ? 'text-yellow-700 dark:text-yellow-300' : 'text-green-700 dark:text-green-300'}`}>
+                  <span className={`w-2 h-2 rounded-full ${criticReport.decision === 'revise' ? 'bg-yellow-500' : 'bg-green-500'}`} />
+                  {criticReport.decision === 'revise' ? 'Revision Suggested' : 'Accepted'}
+                </span>
+                {criticReport.score != null && (
+                  <span className="font-mono text-gray-500 dark:text-gray-400">{Math.round(criticReport.score)}/100</span>
+                )}
+              </div>
+              <p className="text-gray-600 dark:text-gray-300 leading-relaxed">{criticReport.reasoning_summary}</p>
+              {criticReport.missing_features && criticReport.missing_features.length > 0 && (
+                <Row label="Missing" value={criticReport.missing_features.slice(0, 3).join(', ')} wrap />
+              )}
+              {criticReport.prompt_adjustment && (
+                <Row label="Adjustment" value={criticReport.prompt_adjustment} wrap />
+              )}
             </div>
           </div>
         )}

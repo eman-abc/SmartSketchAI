@@ -13,7 +13,7 @@ from rest_framework.response import Response
 from django.db import connection
 from rest_framework.views import APIView
 
-from .models import User, GeneratedImage, EditedImage, ImageScore, AuditLog, ForensicRequest, Conversation
+from .models import User, GeneratedImage, EditedImage, ImageScore, AuditLog, ForensicRequest, Conversation, ForensicCritique
 from .serializers import (
     UserSerializer, RegisterSerializer, GeneratedImageSerializer, EditedImageSerializer,
     ImageScoreSerializer, AuditLogSerializer, ForensicRequestSerializer
@@ -27,6 +27,71 @@ def pil_to_content_file(image, filename):
     buffer = io.BytesIO()
     image.save(buffer, format='PNG')
     return ContentFile(buffer.getvalue(), name=filename)
+
+
+def normalize_ml_base_url(url):
+    base = (url or "").strip().rstrip("/")
+    for suffix in ("/generate", "/edit", "/age", "/analyze", "/critic"):
+        if base.endswith(suffix):
+            base = base.rsplit("/", 1)[0]
+    return base
+
+
+def call_remote_critic(image_b64, prompt, suspect_profile=None, route_used="generate", scores=None, metadata=None):
+    ml_config = getattr(settings, 'ML_CONFIG', {})
+    if not ml_config.get('ENABLE_FORENSIC_CRITIC', True) or not COLAB_ML_URL:
+        return None
+
+    base = normalize_ml_base_url(COLAB_ML_URL)
+    try:
+        resp = requests.post(
+            f"{base}/critic",
+            json={
+                "image_base64": image_b64,
+                "suspect_profile": suspect_profile or {},
+                "prompt": prompt or "",
+                "route_used": route_used,
+                "scores": scores or {},
+                "metadata": metadata or {},
+            },
+            headers={
+                "ngrok-skip-browser-warning": "1",
+                "User-Agent": "SmartSketch-Django/1.0",
+            },
+            timeout=90,
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            if data.get("success"):
+                return data.get("critic_report")
+            if data.get("decision"):
+                return data
+    except Exception as critic_e:
+        print(f"Critic service failed: {critic_e}")
+    return None
+
+
+def save_critique(report, generated=None, edited=None):
+    if not report:
+        return None
+    try:
+        critic_score = None if report.get("score") is None else float(report.get("score"))
+    except (TypeError, ValueError):
+        critic_score = None
+    return ForensicCritique.objects.create(
+        image=generated,
+        edited_image=edited,
+        model_name=report.get("model", ""),
+        decision=report.get("decision", "accept"),
+        score=critic_score,
+        issues=report.get("issues") or [],
+        matched_features=report.get("matched_features") or [],
+        missing_features=report.get("missing_features") or [],
+        prompt_adjustment=report.get("prompt_adjustment") or "",
+        safety_flags=report.get("safety_flags") or [],
+        reasoning_summary=report.get("reasoning_summary") or "",
+        raw_report=report,
+    )
 
 # Simple registration view
 class RegisterView(generics.CreateAPIView):
@@ -114,9 +179,7 @@ def generate_forensic_sketch(request):
     if COLAB_ML_URL:
         # Strip any path suffix (e.g. /generate) so we always get the bare base URL,
         # then append the correct route.  Works regardless of what the user pasted in .env.
-        _base = COLAB_ML_URL.rstrip('/')
-        if _base.endswith('/generate') or _base.endswith('/edit'):
-            _base = _base.rsplit('/', 1)[0]
+        _base = normalize_ml_base_url(COLAB_ML_URL)
         ml_url = f"{_base}/generate"
         try:
             ml_resp = requests.post(
@@ -142,11 +205,23 @@ def generate_forensic_sketch(request):
                             user=user,
                             prompt=prompt,
                             image_file=image_file,
+                            generation_id=generation_id,
                             seed=ml_data.get("metadata", {}).get("seed"),
                             model_version=ml_data.get("metadata", {}).get("model_version", "colab-v1"),
+                            forensic_hash=ml_data.get("forensic_hash"),
+                            is_watermarked=ml_data.get("is_watermarked", False),
                         )
 
                         scores = ml_data.get("scores") or {}
+                        critic_report = ml_data.get("critic_report") or call_remote_critic(
+                            image_b64=image_b64,
+                            prompt=prompt,
+                            route_used="generate",
+                            scores=scores,
+                            metadata=ml_data.get("metadata", {}),
+                        )
+                        save_critique(critic_report, generated=generated)
+
                         ImageScore.objects.create(
                             image=generated,
                             clip_score=scores.get("clip_score"),
@@ -169,6 +244,9 @@ def generate_forensic_sketch(request):
                                 "scores": scores,
                                 "metadata": ml_data.get("metadata", {}),
                                 "generation_id": generation_id,
+                                "forensic_hash": ml_data.get("forensic_hash"),
+                                "is_watermarked": ml_data.get("is_watermarked", False),
+                                "critic_report": critic_report,
                                 "provider": "colab"
                             },
                             status=status.HTTP_200_OK,
@@ -200,9 +278,14 @@ def generate_forensic_sketch(request):
                     user=user,
                     prompt=prompt,
                     image_file=image_file,
+                    generation_id=generation_id,
                     seed=ml_data.get("metadata", {}).get("seed"),
                     model_version=ml_data.get("metadata", {}).get("model_version", "local-v1"),
+                    forensic_hash=ml_data.get("forensic_hash"),
+                    is_watermarked=ml_data.get("is_watermarked", False),
                 )
+                critic_report = ml_data.get("critic_report")
+                save_critique(critic_report, generated=generated)
 
                 scores = ml_data.get("scores") or {}
                 ImageScore.objects.create(
@@ -227,6 +310,9 @@ def generate_forensic_sketch(request):
                         "scores": scores,
                         "metadata": ml_data.get("metadata", {}),
                         "generation_id": generation_id,
+                        "forensic_hash": ml_data.get("forensic_hash"),
+                        "is_watermarked": ml_data.get("is_watermarked", False),
+                        "critic_report": critic_report,
                         "provider": "local"
                     },
                     status=status.HTTP_200_OK,
@@ -269,9 +355,7 @@ def edit_forensic_sketch(request):
     # 1. Try Colab ML Service First (Primary)
     # ================================================================
     if COLAB_ML_URL:
-        _base = COLAB_ML_URL.rstrip('/')
-        if _base.endswith('/generate') or _base.endswith('/edit'):
-            _base = _base.rsplit('/', 1)[0]
+        _base = normalize_ml_base_url(COLAB_ML_URL)
         ml_url = f"{_base}/edit"
         try:
             with generated_image.image_file.open('rb') as f:
@@ -306,10 +390,20 @@ def edit_forensic_sketch(request):
                             original_image=generated_image,
                             edit_prompt=edit_prompt,
                             edited_file=edited_file,
+                            forensic_hash=ml_data.get("forensic_hash"),
+                            is_watermarked=ml_data.get("is_watermarked", False),
                         )
 
                         scores = ml_data.get("scores") or {}
                         identity_score = ml_data.get("identity_score", 0)
+                        critic_report = ml_data.get("critic_report") or call_remote_critic(
+                            image_b64=edited_image_b64,
+                            prompt=edit_prompt,
+                            route_used=ml_data.get("route_used", "edit"),
+                            scores=scores,
+                            metadata={"edit_id": edit_id, "original_generation_id": generated_image.generation_id},
+                        )
+                        save_critique(critic_report, edited=edited)
 
                         ImageScore.objects.create(
                             edited_image=edited,
@@ -333,6 +427,11 @@ def edit_forensic_sketch(request):
                                 "edited_image_url": request.build_absolute_uri(edited.edited_file.url),
                                 "edit_prompt": edit_prompt,
                                 "identity_score": identity_score,
+                                "scores": scores,
+                                "forensic_hash": ml_data.get("forensic_hash"),
+                                "is_watermarked": ml_data.get("is_watermarked", False),
+                                "critic_report": critic_report,
+                                "edit_id": edit_id,
                                 "provider": "colab"
                             },
                             status=status.HTTP_200_OK,
@@ -368,10 +467,14 @@ def edit_forensic_sketch(request):
                     original_image=generated_image,
                     edit_prompt=edit_prompt,
                     edited_file=edited_file,
+                    forensic_hash=ml_data.get("forensic_hash"),
+                    is_watermarked=ml_data.get("is_watermarked", False),
                 )
 
                 scores = ml_data.get("scores") or {}
                 identity_score = ml_data.get("identity_score", 0)
+                critic_report = ml_data.get("critic_report")
+                save_critique(critic_report, edited=edited)
 
                 ImageScore.objects.create(
                     edited_image=edited,
@@ -395,6 +498,11 @@ def edit_forensic_sketch(request):
                         "edited_image_url": request.build_absolute_uri(edited.edited_file.url),
                         "edit_prompt": edit_prompt,
                         "identity_score": identity_score,
+                        "scores": scores,
+                        "forensic_hash": ml_data.get("forensic_hash"),
+                        "is_watermarked": ml_data.get("is_watermarked", False),
+                        "critic_report": critic_report,
+                        "edit_id": edit_id,
                         "provider": "local"
                     },
                     status=status.HTTP_200_OK,
@@ -429,9 +537,7 @@ def age_forensic_sketch(request):
 
     # 1. Try Colab/Modal
     if COLAB_ML_URL:
-        _base = COLAB_ML_URL.rstrip('/')
-        if _base.endswith('/generate') or _base.endswith('/edit') or _base.endswith('/age'):
-            _base = _base.rsplit('/', 1)[0]
+        _base = normalize_ml_base_url(COLAB_ML_URL)
         ml_url = f"{_base}/age"
         try:
             with generated_image.image_file.open('rb') as f:
@@ -465,10 +571,20 @@ def age_forensic_sketch(request):
                             original_image=generated_image,
                             edit_prompt=f"Age progression: {years} years",
                             edited_file=edited_file,
+                            forensic_hash=ml_data.get("forensic_hash"),
+                            is_watermarked=ml_data.get("is_watermarked", False),
                         )
 
                         scores = ml_data.get("scores") or {}
                         identity_score = ml_data.get("identity_score", 0)
+                        critic_report = ml_data.get("critic_report") or call_remote_critic(
+                            image_b64=edited_image_b64,
+                            prompt=f"Age progression: {years} years",
+                            route_used="age",
+                            scores=scores,
+                            metadata={"edit_id": edit_id, "years": years},
+                        )
+                        save_critique(critic_report, edited=edited)
 
                         ImageScore.objects.create(
                             edited_image=edited,
@@ -483,6 +599,11 @@ def age_forensic_sketch(request):
                             "edited_image_url": request.build_absolute_uri(edited.edited_file.url),
                             "years": years,
                             "identity_score": identity_score,
+                            "scores": scores,
+                            "forensic_hash": ml_data.get("forensic_hash"),
+                            "is_watermarked": ml_data.get("is_watermarked", False),
+                            "critic_report": critic_report,
+                            "edit_id": edit_id,
                             "provider": "colab"
                         }, status=status.HTTP_200_OK)
         except Exception as colab_e:
@@ -513,13 +634,21 @@ def age_forensic_sketch(request):
                     original_image=generated_image,
                     edit_prompt=f"Age progression: {years} years",
                     edited_file=edited_file,
+                    forensic_hash=ml_data.get("forensic_hash"),
+                    is_watermarked=ml_data.get("is_watermarked", False),
                 )
+                critic_report = ml_data.get("critic_report")
+                save_critique(critic_report, edited=edited)
 
                 return Response({
                     "id": edited.id,
                     "original_image_id": generated_image.id,
                     "edited_image_url": request.build_absolute_uri(edited.edited_file.url),
                     "years": years,
+                    "forensic_hash": ml_data.get("forensic_hash"),
+                    "is_watermarked": ml_data.get("is_watermarked", False),
+                    "critic_report": critic_report,
+                    "edit_id": edit_id,
                     "provider": "local"
                 }, status=status.HTTP_200_OK)
         except Exception as local_e:
@@ -576,6 +705,7 @@ def agent_chat(request):
         image_data = final_state.get("current_image")   # base64 str or PIL Image
         gen_id     = final_state.get("generation_id") or ("agent_" + thread_id)
         gen_params = final_state.get("generation_params") or {}
+        critic_report = final_state.get("critic_report")
 
         image_url      = None
         saved_image_id = None
@@ -602,6 +732,7 @@ def agent_chat(request):
                         model_version="agent-sdxl-v1",
                         generation_id=gen_id,
                     )
+                    save_critique(critic_report, generated=generated)
                     ImageScore.objects.create(
                         image=generated,
                         identity_score=gen_params.get("last_identity_score"),
@@ -634,6 +765,8 @@ def agent_chat(request):
             "next_step":       final_state.get("next_step"),
             "iteration":       final_state.get("iteration_count"),
             "last_error":      final_state.get("last_error"),
+            "critic_report":   critic_report,
+            "verification_history": final_state.get("verification_history") or [],
         }, status=status.HTTP_200_OK)
 
     except Exception as e:
@@ -774,6 +907,13 @@ def export_report_view(request):
                 data.append(['Quality Score:', f'{score_obj.final_score:.1f}/100'])
             if score_obj.identity_score:
                 data.append(['Identity Score:', f'{float(score_obj.identity_score)*100:.1f}%'])
+        critique = generated.critiques.order_by('-created_at').first()
+        if critique:
+            data.append(['Critic Decision:', str(critique.decision).title()])
+            if critique.score is not None:
+                data.append(['Critic Score:', f'{float(critique.score):.1f}/100'])
+            if critique.reasoning_summary:
+                data.append(['Critic Notes:', str(critique.reasoning_summary)])
 
         tbl = Table(data, colWidths=[4*cm, 13*cm])
         tbl.setStyle(TableStyle([

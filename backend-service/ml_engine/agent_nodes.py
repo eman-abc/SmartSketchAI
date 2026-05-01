@@ -6,10 +6,12 @@ import json
 import re
 import io
 import base64
+import os
 from typing import Dict, Any, Optional, List
 from PIL import Image as PilImage
 
 from .agent_state import ForensicAgentState, SuspectProfile
+from .critic import ForensicCriticClient, normalize_critic_report
 
 
 # ---------------------------------------------------------------------------
@@ -347,61 +349,136 @@ MAX_RETRIES = 3
 
 class VerificationNode:
     """
-    Scores the generated/edited image using FaceScorer.
-    Triggers a self-correction retry if quality is below threshold.
+    Scores the image and optionally asks the self-hosted VLM critic for a
+    forensic review. The critic can request a bounded retry with an adjustment.
     """
 
-    def __init__(self, scorer=None):
+    def __init__(self, scorer=None, critic_client: Optional[ForensicCriticClient] = None):
         self.scorer = scorer
+        self.critic_client = critic_client
+        self.enable_critic = os.environ.get(
+            "SMARTSKETCH_ENABLE_FORENSIC_CRITIC", "True"
+        ).lower() == "true"
+        try:
+            self.critic_max_retries = int(os.environ.get("SMARTSKETCH_CRITIC_MAX_RETRIES", "2"))
+        except ValueError:
+            self.critic_max_retries = 2
 
     def __call__(self, state: ForensicAgentState) -> Dict[str, Any]:
         print("\n--- VERIFYING GENERATION QUALITY ---")
 
-        current_b64  = state.get("current_image")
-        iteration    = state.get("iteration_count", 0)
+        current_data = state.get("current_image")
+        iteration = state.get("iteration_count", 0)
+        history = list(state.get("verification_history") or [])
 
-        # --- No scorer or no image: pass through ---
-        if self.scorer is None or current_b64 is None:
-            reason = "no scorer" if self.scorer is None else "no image in state"
-            print(f"[Verifier] Skipping real score ({reason}) → accepting result")
+        if current_data is None:
+            print("[Verifier] No image in state -> accepting result")
             return {"next_step": "end", "is_verified": True, "last_score": None}
 
-        # Decode base64 string → PIL Image for CLIP scoring
         try:
-            current_image = PilImage.open(
-                io.BytesIO(base64.b64decode(current_b64))
-            ).convert("RGB")
+            if isinstance(current_data, PilImage.Image):
+                current_image = current_data.convert("RGB")
+            elif isinstance(current_data, str):
+                current_image = PilImage.open(
+                    io.BytesIO(base64.b64decode(current_data))
+                ).convert("RGB")
+            else:
+                print("[Verifier] Unsupported image payload -> accepting result")
+                return {"next_step": "end", "is_verified": True, "last_score": None}
         except Exception as dec_err:
-            print(f"[Verifier] Could not decode image ({dec_err}) → accepting result")
+            print(f"[Verifier] Could not decode image ({dec_err}) -> accepting result")
             return {"next_step": "end", "is_verified": True, "last_score": None}
 
-        # Build prompt from the current suspect profile for CLIP scoring
         profile = state.get("suspect_profile")
-        prompt  = profile.to_detailed_prompt() if profile else "forensic face"
+        prompt = profile.to_detailed_prompt() if profile else "forensic face"
+        generation_params = state.get("generation_params") or {}
+        identity_score = generation_params.get("last_identity_score")
 
-        # Get identity_score from state if the artist node saved it
-        identity_score = state.get("generation_params", {}).get("last_identity_score")
+        scores = None
+        combined = None
+        if self.scorer is not None:
+            try:
+                scores = self.scorer.score_generation(
+                    image=current_image,
+                    prompt=prompt,
+                    identity_score=identity_score,
+                )
+                combined = scores.get("combined_score", 0.0)
+                print(f"[Verifier] combined_score={combined:.1f}  interpretation={scores.get('interpretation')}")
+            except Exception as exc:
+                print(f"[Verifier] Scoring failed: {exc}")
 
-        try:
-            scores = self.scorer.score_generation(
+        if self.enable_critic and self.critic_client and self.critic_client.is_configured():
+            critic_report = self.critic_client.analyze(
                 image=current_image,
-                prompt=prompt,
-                identity_score=identity_score,
+                suspect_profile=profile.model_dump() if profile else {},
+                prompt=state.get("enhanced_prompt") or prompt,
+                route_used=state.get("next_step", "unknown"),
+                scores=scores or {},
+                metadata={
+                    "generation_id": state.get("generation_id"),
+                    "iteration": iteration,
+                    "generation_params": generation_params,
+                },
             )
-            combined = scores.get("combined_score", 0.0)
-            print(f"[Verifier] combined_score={combined:.1f}  interpretation={scores.get('interpretation')}")
+            print(
+                "[Verifier/Critic] decision="
+                + str(critic_report.get("decision"))
+                + " score="
+                + str(critic_report.get("score"))
+            )
+        else:
+            critic_report = normalize_critic_report(
+                {"reasoning_summary": "Self-hosted critic disabled or not configured."}
+            )
 
-            if combined >= QUALITY_THRESHOLD:
-                print(f"[Verifier] ✅ Quality accepted (score={combined:.1f})")
-                return {"next_step": "end", "is_verified": True, "last_score": combined}
+        history.append(
+            {
+                "score": combined,
+                "critic_decision": critic_report.get("decision"),
+                "critic_score": critic_report.get("score"),
+                "summary": critic_report.get("reasoning_summary"),
+            }
+        )
 
-            if iteration < MAX_RETRIES:
-                print(f"[Verifier] ⚠️ Low quality (score={combined:.1f}). Retrying [{iteration}/{MAX_RETRIES}] …")
-                return {"next_step": "retry", "is_verified": False, "last_score": combined}
+        critic_attempts = int(state.get("critic_attempts") or 0)
+        adjustment = str(critic_report.get("prompt_adjustment") or "").strip()
+        wants_revision = critic_report.get("decision") == "revise" and bool(adjustment)
+        can_retry_critic = critic_attempts < self.critic_max_retries and iteration < MAX_RETRIES
 
-            print(f"[Verifier] Giving up after {iteration} attempts (score={combined:.1f})")
-            return {"next_step": "end", "is_verified": False, "last_score": combined}
+        if wants_revision and can_retry_critic:
+            print(f"[Verifier/Critic] Revision requested. Retrying [{critic_attempts + 1}/{self.critic_max_retries}]")
+            return {
+                "next_step": "retry",
+                "is_verified": False,
+                "last_score": combined,
+                "critic_report": critic_report,
+                "critic_adjustment_prompt": adjustment,
+                "critic_attempts": critic_attempts + 1,
+                "iteration_count": iteration + 1,
+                "verification_history": history,
+            }
 
-        except Exception as e:
-            print(f"[Verifier] Scoring failed: {e} → accepting result")
-            return {"next_step": "end", "is_verified": True, "last_score": None}
+        if combined is not None and combined < QUALITY_THRESHOLD and iteration < MAX_RETRIES:
+            print(f"[Verifier] Low quality (score={combined:.1f}). Retrying [{iteration}/{MAX_RETRIES}]")
+            return {
+                "next_step": "retry",
+                "is_verified": False,
+                "last_score": combined,
+                "critic_report": critic_report,
+                "iteration_count": iteration + 1,
+                "verification_history": history,
+            }
+
+        is_verified = combined is None or combined >= QUALITY_THRESHOLD
+        if critic_report.get("decision") == "revise" and not can_retry_critic:
+            is_verified = False
+
+        print(f"[Verifier] Ending verification. verified={is_verified} score={combined}")
+        return {
+            "next_step": "end",
+            "is_verified": is_verified,
+            "last_score": combined,
+            "critic_report": critic_report,
+            "verification_history": history,
+        }
