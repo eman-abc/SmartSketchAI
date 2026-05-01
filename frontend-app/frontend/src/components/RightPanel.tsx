@@ -163,6 +163,27 @@ export default function RightPanel({
             </div>
           </div>
 
+          {/* ── Sketch Style Toggle ───────────────────────────────────── */}
+          {hasGenerate && (
+            <div className="mt-3">
+              <p className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2">Sketch Style</p>
+              <div className="flex gap-1.5">
+                {(Object.keys(STYLE_LABELS) as SketchStyle[]).map(style => (
+                  <button
+                    key={style}
+                    type="button"
+                    onClick={() => handleStyleChange(style)}
+                    disabled={styleLoading}
+                    className={`flex-1 text-xs py-2 px-1 rounded-lg border font-medium transition-all ${
+                      activeStyle === style
+                        ? 'bg-blue-600 border-blue-600 text-white shadow-sm'
+                        : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:border-blue-400 hover:text-blue-600'
+                    } disabled:opacity-50 disabled:cursor-not-allowed`}
+                  >
+                    {STYLE_LABELS[style]}
+                  </button>
+                ))}
+              </div>
             </div>
           )}
         </div>
