@@ -1,4 +1,5 @@
 import { API_BASE_URL } from '../config';
+import type { ForensicStreamEvent, ForensicStreamEventType } from '../types';
 import {
   getAccessToken,
   getRefreshToken,
@@ -202,6 +203,89 @@ export async function agentChat(body: {
     method: 'POST',
     body,
   });
+}
+
+/**
+ * POST /api/forensic/chat/stream/ using fetch streaming and SSE-formatted chunks.
+ * Uses Bearer token auth (native EventSource cannot set headers).
+ */
+export async function agentChatStream(
+  body: { message: string; thread_id?: string; case_number?: string },
+  onEvent: (event: ForensicStreamEvent) => void
+): Promise<void> {
+  const access = getAccessToken();
+  const url = `${API_BASE_URL.replace(/\/$/, '')}/forensic/chat/stream/`;
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(access ? { Authorization: `Bearer ${access}` } : {}),
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    let message = res.statusText || 'Stream request failed';
+    try {
+      const err = (await res.json()) as { error?: string; detail?: string };
+      message = err.error ?? err.detail ?? message;
+    } catch {
+      // ignore
+    }
+    throw new Error(message);
+  }
+
+  if (!res.body) {
+    throw new Error('Streaming response body is not available');
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  const flushBlock = (block: string) => {
+    const lines = block.split('\n');
+    let eventName: ForensicStreamEventType = 'status';
+    let dataStr = '';
+
+    for (const line of lines) {
+      if (line.startsWith('event: ')) {
+        const value = line.slice(7).trim();
+        if (value === 'status' || value === 'progress' || value === 'result' || value === 'error') {
+          eventName = value;
+        }
+      } else if (line.startsWith('data: ')) {
+        dataStr += line.slice(6);
+      }
+    }
+
+    if (!dataStr) return;
+    try {
+      const parsed = JSON.parse(dataStr) as ForensicStreamEvent['data'];
+      onEvent({ event: eventName, data: parsed });
+    } catch {
+      onEvent({ event: 'error', data: { error: 'Failed to parse stream payload' } });
+    }
+  };
+
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    let boundary = buffer.indexOf('\n\n');
+    while (boundary !== -1) {
+      const block = buffer.slice(0, boundary).trim();
+      buffer = buffer.slice(boundary + 2);
+      if (block) flushBlock(block);
+      boundary = buffer.indexOf('\n\n');
+    }
+  }
+
+  const trailing = buffer.trim();
+  if (trailing) {
+    flushBlock(trailing);
+  }
 }
 
 /** POST /api/forensic/sketch-style/ — convert to pencil/charcoal */

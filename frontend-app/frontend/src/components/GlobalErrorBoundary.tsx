@@ -44,12 +44,12 @@ export default class GlobalErrorBoundary extends Component<
     }
 
     return (
-      <main className="min-h-screen bg-gray-50 dark:bg-gray-950 flex items-center justify-center px-4">
-        <section className="w-full max-w-md bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-lg shadow-sm p-6 text-center">
-          <div className="mx-auto mb-4 h-11 w-11 rounded-full bg-red-50 dark:bg-red-950/40 flex items-center justify-center">
+      <main className="flex min-h-screen flex-col items-center justify-center bg-forensic-studio px-4 py-12 text-text-high antialiased">
+        <section className="glass-card w-full max-w-md border-danger/30 p-8 text-center shadow-panel">
+          <div className="mx-auto mb-5 flex h-12 w-12 items-center justify-center rounded-2xl border border-danger/40 bg-danger/10">
             <svg
               aria-hidden="true"
-              className="h-6 w-6 text-red-600 dark:text-red-400"
+              className="h-7 w-7 text-danger"
               fill="none"
               viewBox="0 0 24 24"
               stroke="currentColor"
@@ -62,30 +62,22 @@ export default class GlobalErrorBoundary extends Component<
               />
             </svg>
           </div>
-          <h1 className="text-lg font-semibold text-gray-950 dark:text-white">
-            Something went wrong
-          </h1>
-          <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">
-            SmartSketch hit an unexpected interface error. Your session may still be available after a retry or reload.
+          <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.25em] text-muted">System</p>
+          <h1 className="text-xl font-semibold tracking-tight text-text-high">Something went wrong</h1>
+          <p className="mt-3 text-sm leading-relaxed text-muted">
+            SmartSketch hit an unexpected interface error. Your session may still be available after a retry or full
+            reload.
           </p>
           {this.state.error?.message && (
-            <p className="mt-3 rounded-md bg-gray-100 dark:bg-gray-800 px-3 py-2 text-xs text-gray-600 dark:text-gray-300">
+            <p className="mt-4 rounded-2xl border border-studio bg-surface px-3 py-2.5 text-left font-mono text-[11px] leading-relaxed text-brand/90">
               {this.state.error.message}
             </p>
           )}
-          <div className="mt-5 flex flex-col sm:flex-row gap-2">
-            <button
-              type="button"
-              onClick={this.handleTryAgain}
-              className="flex-1 rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:focus:ring-offset-gray-900"
-            >
+          <div className="mt-8 flex flex-col gap-3 sm:flex-row">
+            <button type="button" onClick={this.handleTryAgain} className="btn-primary flex-1 py-3 text-sm">
               Try again
             </button>
-            <button
-              type="button"
-              onClick={this.handleReload}
-              className="flex-1 rounded-md border border-gray-300 dark:border-gray-700 px-4 py-2 text-sm font-medium text-gray-800 dark:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-gray-400 focus:ring-offset-2 dark:focus:ring-offset-gray-900"
-            >
+            <button type="button" onClick={this.handleReload} className="btn-secondary flex-1 py-3 text-sm">
               Reload app
             </button>
           </div>

@@ -74,3 +74,44 @@ export interface ChatSession {
   editResult: EditResult | null;
   createdAt: number;
 }
+
+export type ForensicStreamEventType = 'status' | 'progress' | 'result' | 'error';
+
+export interface ForensicStreamStatusData {
+  stage?: string;
+  message: string;
+  percent?: number;
+}
+
+export interface AgentChatResult {
+  status: string;
+  thread_id: string;
+  case_number?: string;
+  suspect_profile?: Record<string, unknown>;
+  image_url?: string | null;
+  image_id?: number | null;
+  generation_id?: string | null;
+  identity_score?: number | null;
+  last_score?: number | null;
+  is_verified?: boolean;
+  next_step?: string | null;
+  iteration?: number | null;
+  last_error?: string | null;
+  critic_report?: CriticReport | null;
+  verification_history?: unknown[];
+  forensic_hash?: string;
+}
+
+export interface ForensicStreamEvent {
+  event: ForensicStreamEventType;
+  data: ForensicStreamStatusData | AgentChatResult | { error: string };
+}
+
+export interface ForensicLogEntry {
+  id: string;
+  timestamp: string;
+  stage: string;
+  message: string;
+  percent?: number;
+  level: 'info' | 'error' | 'result';
+}

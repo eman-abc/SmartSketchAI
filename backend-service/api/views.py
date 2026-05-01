@@ -3,9 +3,11 @@
 import base64
 import io
 import os
+import json
 import requests
 from django.core.files.base import ContentFile
 from django.utils import timezone
+from django.http import HttpResponse, StreamingHttpResponse
 from rest_framework import generics, permissions, status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
@@ -774,6 +776,144 @@ def agent_chat(request):
         import traceback
         traceback.print_exc()
         return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+def _sse_format(payload, event=None):
+    lines = []
+    if event:
+        lines.append(f"event: {event}")
+    lines.append(f"data: {json.dumps(payload)}")
+    return "\n".join(lines) + "\n\n"
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def agent_chat_stream(request):
+    """
+    Streaming variant of agent_chat that emits SSE status updates + final result.
+    """
+    from PIL import Image as PilImage
+    import uuid as _uuid
+
+    user = request.user
+    message = request.data.get("message")
+    thread_id = request.data.get("thread_id")
+    case_number = request.data.get("case_number")
+
+    if not message:
+        return Response({"error": "message is required"}, status=status.HTTP_400_BAD_REQUEST)
+
+    if thread_id:
+        conversation, _ = Conversation.objects.get_or_create(
+            thread_id=thread_id, user=user,
+            defaults={"case_number": case_number},
+        )
+    else:
+        thread_id = "thread_" + _uuid.uuid4().hex[:8]
+        conversation = Conversation.objects.create(
+            thread_id=thread_id,
+            user=user,
+            case_number=case_number or ("CASE-" + _uuid.uuid4().hex[:4].upper()),
+        )
+
+    def event_stream():
+        try:
+            yield _sse_format(
+                {"stage": "analyzer", "message": "[Analyzer] Extracting eye color...", "percent": 15},
+                event="status"
+            )
+
+            agent = MLService.get_agent()
+
+            yield _sse_format(
+                {"stage": "modal", "message": "[Modal] Warming SDXL Engine...", "percent": 35},
+                event="status"
+            )
+            yield _sse_format(
+                {"stage": "artist", "message": "[Artist] Denoising: 45%...", "percent": 45},
+                event="progress"
+            )
+
+            final_state = agent.run(message, thread_id=thread_id)
+
+            profile = final_state.get("suspect_profile")
+            image_data = final_state.get("current_image")
+            gen_id = final_state.get("generation_id") or ("agent_" + thread_id)
+            gen_params = final_state.get("generation_params") or {}
+            critic_report = final_state.get("critic_report")
+
+            image_url = None
+            saved_image_id = None
+
+            if image_data is not None:
+                try:
+                    if isinstance(image_data, str):
+                        pil_img = PilImage.open(
+                            io.BytesIO(base64.b64decode(image_data))
+                        ).convert("RGB")
+                    elif isinstance(image_data, PilImage.Image):
+                        pil_img = image_data
+                    else:
+                        pil_img = None
+
+                    if pil_img is not None:
+                        image_file = pil_to_content_file(pil_img, gen_id + ".png")
+                        generated = GeneratedImage.objects.create(
+                            user=user,
+                            prompt=profile.to_detailed_prompt() if profile else message,
+                            image_file=image_file,
+                            model_version="agent-sdxl-v1",
+                            generation_id=gen_id,
+                        )
+                        save_critique(critic_report, generated=generated)
+                        ImageScore.objects.create(
+                            image=generated,
+                            identity_score=gen_params.get("last_identity_score"),
+                            final_score=final_state.get("last_score"),
+                        )
+                        AuditLog.objects.create(
+                            user=user,
+                            action="generate",
+                            ip_address=request.META.get("REMOTE_ADDR"),
+                            prompt_used=message,
+                            image=generated,
+                        )
+                        image_url = request.build_absolute_uri(generated.image_file.url)
+                        saved_image_id = generated.id
+                except Exception as save_err:
+                    print("[AgentChatStream] Image save failed: " + str(save_err))
+
+            result_payload = {
+                "status": "success",
+                "thread_id": thread_id,
+                "case_number": conversation.case_number,
+                "suspect_profile": profile.model_dump() if profile else {},
+                "image_url": image_url,
+                "image_id": saved_image_id,
+                "generation_id": gen_id,
+                "identity_score": gen_params.get("last_identity_score"),
+                "last_score": final_state.get("last_score"),
+                "is_verified": final_state.get("is_verified", False),
+                "next_step": final_state.get("next_step"),
+                "iteration": final_state.get("iteration_count"),
+                "last_error": final_state.get("last_error"),
+                "critic_report": critic_report,
+                "verification_history": final_state.get("verification_history") or [],
+            }
+
+            yield _sse_format(
+                {"stage": "artist", "message": "[Artist] Rendering complete.", "percent": 100},
+                event="status"
+            )
+            yield _sse_format(result_payload, event="result")
+        except Exception as e:
+            print("[Agent Stream Error] " + str(e))
+            yield _sse_format({"error": str(e)}, event="error")
+
+    response = StreamingHttpResponse(event_stream(), content_type="text/event-stream")
+    response["Cache-Control"] = "no-cache"
+    response["X-Accel-Buffering"] = "no"
+    return response
 
 
 # ---------------------------------------------------------------------------

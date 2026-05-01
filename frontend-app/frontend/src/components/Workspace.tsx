@@ -1,9 +1,12 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
-import { agentChat } from '../lib/api';
-import type { CriticReport, GenerateResult } from '../types';
-
-// Stable session thread ID — one conversation per browser tab
-const SESSION_THREAD_ID = `session_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+import { agentChat, agentChatStream } from '../lib/api';
+import type {
+  CriticReport,
+  GenerateResult,
+  ForensicLogEntry,
+  AgentChatResult,
+  ForensicStreamStatusData,
+} from '../types';
 
 const PROGRESS_STEPS = [
   'Analyzing suspect description…',
@@ -13,6 +16,14 @@ const PROGRESS_STEPS = [
   'Embedding integrity watermark…',
   'Finalizing sketch…',
 ];
+
+function loadingStatusChip(step: string): string {
+  const s = step.toLowerCase();
+  if (s.includes('analyz')) return 'Analyzing…';
+  if (s.includes('verif') || s.includes('finaliz') || s.includes('watermark')) return 'Verifying…';
+  if (s.includes('generat') || s.includes('portrait') || s.includes('facial')) return 'Generating…';
+  return 'Processing…';
+}
 
 type ChatMessage = {
   id: string;
@@ -29,6 +40,8 @@ type ChatMessage = {
 type WorkspaceProps = {
   onGenerateResult?: (result: GenerateResult | null, prompt: string) => void;
   selectedImage?: GenerateResult | null;
+  onStreamLogsChange?: (logs: ForensicLogEntry[]) => void;
+  onLoadingChange?: (loading: boolean) => void;
 };
 
 const EXAMPLE_PROMPTS = [
@@ -37,23 +50,48 @@ const EXAMPLE_PROMPTS = [
   'Heavy-set male, 50s, bald, thick grey beard, prominent nose',
 ];
 
-export default function Workspace({ onGenerateResult, selectedImage }: WorkspaceProps) {
+export default function Workspace({
+  onGenerateResult,
+  selectedImage,
+  onStreamLogsChange,
+  onLoadingChange,
+}: WorkspaceProps) {
+  const threadIdRef = useRef(`session_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`);
+
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [stepIdx, setStepIdx] = useState(0);
   const [progress, setProgress] = useState(0);
+  const [streamLogs, setStreamLogs] = useState<ForensicLogEntry[]>([]);
 
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Scroll to bottom on new content
+  const pushLog = useCallback((entry: Omit<ForensicLogEntry, 'id' | 'timestamp'>) => {
+    setStreamLogs((prev) => {
+      const next = [
+        ...prev,
+        {
+          id: `log_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+          timestamp: new Date().toLocaleTimeString(),
+          ...entry,
+        },
+      ].slice(-60);
+      onStreamLogsChange?.(next);
+      return next;
+    });
+  }, [onStreamLogsChange]);
+
+  useEffect(() => {
+    onLoadingChange?.(loading);
+  }, [loading, onLoadingChange]);
+
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, loading]);
 
-  // Sidebar image selection → inject as assistant message
   useEffect(() => {
     if (!selectedImage) return;
     setMessages([{
@@ -67,7 +105,10 @@ export default function Workspace({ onGenerateResult, selectedImage }: Workspace
     onGenerateResult?.(selectedImage, selectedImage.prompt);
   }, [selectedImage]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Progress animation while generating
+  useEffect(() => {
+    onStreamLogsChange?.(streamLogs);
+  }, [streamLogs, onStreamLogsChange]);
+
   useEffect(() => {
     if (loading) {
       setStepIdx(0);
@@ -83,7 +124,9 @@ export default function Workspace({ onGenerateResult, selectedImage }: Workspace
       setProgress(100);
       setTimeout(() => setProgress(0), 600);
     }
-    return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
+    return () => {
+      if (intervalRef.current) clearInterval(intervalRef.current);
+    };
   }, [loading]);
 
   const handleSend = useCallback(async (e: React.FormEvent | React.KeyboardEvent) => {
@@ -92,27 +135,70 @@ export default function Workspace({ onGenerateResult, selectedImage }: Workspace
     if (!trimmed || loading) return;
 
     setInput('');
-    if (textareaRef.current) {
-      textareaRef.current.style.height = 'auto';
-    }
+    if (textareaRef.current) textareaRef.current.style.height = 'auto';
 
     const userMsg: ChatMessage = { id: `u_${Date.now()}`, role: 'user', text: trimmed };
-    setMessages(prev => [...prev, userMsg]);
+    setMessages((prev) => [...prev, userMsg]);
     setLoading(true);
+    setStreamLogs([]);
 
     try {
-      const res = await agentChat({ message: trimmed, thread_id: SESSION_THREAD_ID });
-
-      let aiText = 'Profile updated — keep describing the suspect to generate the sketch.';
-      if (res.last_error) {
-        aiText = `⚠️ ${res.last_error}`;
-      } else if (res.image_url) {
-        if (res.next_step === 'generate') {
-          aiText = 'Generated a new face matching the profile. Keep refining or describe a new feature.';
-        } else {
-          aiText = 'Sketch updated. Keep refining or describe a new feature.';
+      let res: AgentChatResult | null = null;
+      const tid = threadIdRef.current;
+      try {
+        await agentChatStream(
+          { message: trimmed, thread_id: tid },
+          (evt) => {
+            if (evt.event === 'status' || evt.event === 'progress') {
+              const status = evt.data as ForensicStreamStatusData;
+              if (status.percent != null && Number.isFinite(status.percent)) {
+                setProgress(Math.max(5, Math.min(100, status.percent)));
+              }
+              if (status.message) {
+                pushLog({
+                  stage: status.stage ?? 'agent',
+                  message: status.message,
+                  percent: status.percent,
+                  level: 'info',
+                });
+              }
+            } else if (evt.event === 'result') {
+              res = evt.data as AgentChatResult;
+              pushLog({
+                stage: 'result',
+                message: 'Sketch response ready.',
+                level: 'result',
+                percent: 100,
+              });
+            } else if (evt.event === 'error') {
+              const errMsg = (evt.data as { error?: string })?.error ?? 'Stream error';
+              pushLog({ stage: 'error', message: errMsg, level: 'error' });
+            }
+          }
+        );
+      } catch (streamErr) {
+        pushLog({
+          stage: 'fallback',
+          message: 'Stream unavailable, using standard endpoint.',
+          level: 'info',
+        });
+        res = await agentChat({ message: trimmed, thread_id: tid });
+        if (streamErr instanceof Error) {
+          pushLog({ stage: 'fallback', message: streamErr.message, level: 'error' });
         }
       }
+
+      if (!res) throw new Error('No response received from forensic agent');
+
+      let aiText = 'Profile updated — keep describing the suspect to generate the sketch.';
+      if (res.last_error) aiText = `⚠️ ${res.last_error}`;
+      else if (res.image_url) {
+        aiText =
+          res.next_step === 'generate'
+            ? 'Generated a new face matching the profile. Keep refining or describe a new feature.'
+            : 'Sketch updated. Keep refining or describe a new feature.';
+      }
+
       const aiMsg: ChatMessage = {
         id: `a_${Date.now()}`,
         role: 'assistant',
@@ -124,27 +210,34 @@ export default function Workspace({ onGenerateResult, selectedImage }: Workspace
         suspect_profile: res.suspect_profile ?? null,
         critic_report: res.critic_report ?? null,
       };
-      setMessages(prev => [...prev, aiMsg]);
+      setMessages((prev) => [...prev, aiMsg]);
 
       if (res.image_url) {
-        onGenerateResult?.({
-          id: res.image_id,
-          image_url: res.image_url,
-          prompt: trimmed,
-          generation_id: res.generation_id,
-          forensic_hash: res.forensic_hash,
-          critic_report: res.critic_report ?? null,
-          scores: { combined_score: res.last_score, identity_score: res.identity_score },
-          metadata: res.suspect_profile,
-        }, trimmed);
+        onGenerateResult?.(
+          {
+            id: Number(res.image_id ?? 0),
+            image_url: res.image_url as string,
+            prompt: trimmed,
+            generation_id: (res.generation_id ?? '') as string,
+            forensic_hash: res.forensic_hash,
+            critic_report: res.critic_report ?? null,
+            scores: {
+              combined_score: res.last_score ?? undefined,
+              identity_score: res.identity_score ?? undefined,
+            },
+            metadata:
+              (res.suspect_profile as Record<string, unknown> | undefined) ?? {},
+          },
+          trimmed
+        );
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Something went wrong';
-      setMessages(prev => [...prev, { id: `err_${Date.now()}`, role: 'assistant', text: `❌ ${msg}` }]);
+      setMessages((prev) => [...prev, { id: `err_${Date.now()}`, role: 'assistant', text: `❌ ${msg}` }]);
     } finally {
       setLoading(false);
     }
-  }, [input, loading, onGenerateResult]);
+  }, [input, loading, onGenerateResult, pushLog]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -160,150 +253,191 @@ export default function Workspace({ onGenerateResult, selectedImage }: Workspace
   };
 
   return (
-    <div className="flex-1 flex flex-col bg-white dark:bg-gray-900 overflow-hidden">
-
-      {/* Global progress bar */}
+    <div className="flex min-h-0 min-w-0 flex-1 animate-fade-in flex-col overflow-hidden rounded-3xl bg-surface shadow-panel ring-1 ring-white/10">
       {progress > 0 && (
-        <div className="h-0.5 w-full bg-gray-200 dark:bg-gray-800">
+        <div className="h-0.5 w-full shrink-0 bg-panel">
           <div
-            className="h-full bg-gradient-to-r from-blue-500 to-indigo-500 transition-all duration-[2500ms] ease-in-out"
+            className="h-full bg-gradient-to-r from-brand via-brand-secondary to-brand transition-[width] duration-[1800ms] ease-out shadow-soft-glow"
             style={{ width: `${progress}%` }}
           />
         </div>
       )}
 
-      {/* Chat thread */}
-      <div className="flex-1 overflow-y-auto px-4 py-6">
-
-        {/* Empty state */}
+      <div className="studio-canvas-grid min-h-0 flex-1 overflow-y-auto px-5 py-6">
         {messages.length === 0 && !loading && (
-          <div className="max-w-2xl mx-auto text-center pt-12 pb-8">
-            <div className="w-16 h-16 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-2xl mx-auto mb-5 flex items-center justify-center shadow-lg">
-              <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
-                  d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+          <div className="mx-auto max-w-2xl px-4 pt-10 pb-8 text-center">
+            <div className="glass-card mx-auto mb-6 inline-flex h-16 w-16 items-center justify-center rounded-3xl shadow-soft-glow">
+              <svg className="h-9 w-9 text-brand" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={1.5}
+                  d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"
+                />
               </svg>
             </div>
-            <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">SmartSketch AI</h2>
-            <p className="text-gray-500 dark:text-gray-400 mb-8 text-sm">
-              Describe a suspect in natural language. Refine iteratively — the AI remembers the full conversation.
+            <p className="mb-3 text-[10px] uppercase tracking-[0.3em] text-muted">Composite intelligence</p>
+            <h2 className="mb-3 text-2xl font-semibold tracking-tight text-text-high">SmartSketch AI</h2>
+            <p className="mb-10 text-sm text-muted">
+              Describe a suspect in natural language. Refine iteratively — the AI retains full session context.
             </p>
-            <div className="space-y-2 max-w-sm mx-auto">
-              {EXAMPLE_PROMPTS.map(p => (
+            <div className="mx-auto max-w-lg space-y-2">
+              {EXAMPLE_PROMPTS.map((p) => (
                 <button
                   key={p}
                   type="button"
-                  onClick={() => { setInput(p); textareaRef.current?.focus(); }}
-                  className="w-full text-left text-sm px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:border-blue-400 hover:text-blue-600 dark:hover:border-blue-500 dark:hover:text-blue-400 bg-gray-50 dark:bg-gray-800 transition-all duration-150"
+                  onClick={() => {
+                    setInput(p);
+                    textareaRef.current?.focus();
+                  }}
+                  className="w-full rounded-2xl border border-studio px-4 py-3 text-left text-sm text-muted transition duration-200 ease-out hover:border-brand/40 hover:text-text-high hover:shadow-soft-glow"
                 >
-                  "{p}"
+                  &ldquo;{p}&rdquo;
                 </button>
               ))}
             </div>
           </div>
         )}
 
-        {/* Messages */}
-        <div className="max-w-2xl mx-auto space-y-5">
-          {messages.map(msg => (
-            <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} gap-3`}>
-
+        <div className="mx-auto max-w-2xl space-y-5 pb-8">
+          {messages.map((msg) => (
+            <div key={msg.id} className={`flex gap-3 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
               {msg.role === 'assistant' && (
-                <div className="w-8 h-8 flex-shrink-0 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center mt-1">
-                  <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                      d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                <div className="mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-2xl border border-studio bg-brand/15 text-brand shadow-soft-glow">
+                  <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"
+                    />
                   </svg>
                 </div>
               )}
 
-              <div className="max-w-md w-full">
-                {/* Bubble text */}
-                <div className={`px-4 py-2.5 rounded-2xl text-sm leading-relaxed ${
-                  msg.role === 'user'
-                    ? 'bg-blue-600 text-white rounded-tr-sm ml-auto w-fit max-w-full'
-                    : 'bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-white rounded-tl-sm'
-                }`}>
+              <div className="w-full max-w-md">
+                <div
+                  className={`rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${
+                    msg.role === 'user'
+                      ? 'ml-auto w-fit max-w-full bg-brand font-medium text-slate-950 rounded-tr-md shadow-soft-glow'
+                      : 'border border-studio bg-panel text-text-high rounded-tl-md'
+                  }`}
+                >
                   {msg.text}
                 </div>
 
-                {/* Image + score */}
                 {msg.image_url && (
-                  <div className="mt-2 rounded-2xl overflow-hidden border border-gray-200 dark:border-gray-700 shadow-sm">
-                    <img
-                      src={msg.image_url}
-                      alt="Forensic sketch"
-                      className="w-full object-cover cursor-zoom-in"
-                      onClick={() => window.open(msg.image_url!, '_blank')}
-                    />
-                    {msg.score != null && (
-                      <div className="flex items-center gap-2 px-3 py-2 bg-gray-50 dark:bg-gray-800 text-xs text-gray-500 dark:text-gray-400">
-                        <div className={`w-2 h-2 rounded-full flex-shrink-0 ${
-                          msg.score >= 70 ? 'bg-green-500' : msg.score >= 55 ? 'bg-yellow-500' : 'bg-red-500'
-                        }`} />
-                        <span>Quality: <strong className="text-gray-900 dark:text-white">{msg.score.toFixed(1)}/100</strong></span>
-                        <span className="ml-auto font-mono text-gray-400 dark:text-gray-500 truncate">{msg.generation_id}</span>
-                      </div>
-                    )}
-                    {msg.critic_report?.reasoning_summary && (
-                      <div className="border-t border-gray-200 dark:border-gray-700 px-3 py-2 bg-white dark:bg-gray-900 text-xs text-gray-600 dark:text-gray-300">
-                        <div className="flex items-center gap-2 mb-1">
-                          <span className={`w-2 h-2 rounded-full ${msg.critic_report.decision === 'revise' ? 'bg-yellow-500' : 'bg-green-500'}`} />
-                          <span className="font-semibold">
-                            Critic {msg.critic_report.decision === 'revise' ? 'requested refinement' : 'accepted output'}
+                  <div className="mt-3 overflow-hidden rounded-2xl border border-studio shadow-panel ring-1 ring-white/5 transition duration-200 ease-out hover:-translate-y-0.5 hover:shadow-soft-glow">
+                    <div className="relative bg-background">
+                      <span className="absolute left-3 top-3 z-10 rounded-full bg-slate-950/75 px-3 py-1 text-xs font-medium text-slate-200 backdrop-blur-sm">
+                        Rendered output
+                      </span>
+                      <img
+                        src={msg.image_url}
+                        alt="Forensic sketch"
+                        className="w-full cursor-zoom-in object-cover"
+                        onClick={() => window.open(msg.image_url!, '_blank')}
+                      />
+                      <p className="border-t border-studio bg-panel px-4 py-2 text-center text-[10px] uppercase tracking-[0.2em] text-muted">
+                        Primary composite output
+                      </p>
+                      {msg.score != null && (
+                        <div className="flex items-center gap-2 border-t border-studio bg-panel/80 px-3 py-2 text-xs text-muted">
+                          <div
+                            className={`h-2 w-2 shrink-0 rounded-full ${
+                              msg.score >= 70 ? 'bg-success' : msg.score >= 55 ? 'bg-warning' : 'bg-danger'
+                            }`}
+                          />
+                          <span>
+                            Quality:{' '}
+                            <strong className="font-mono text-text-high">{msg.score.toFixed(1)}/100</strong>
                           </span>
-                          {msg.critic_report.score != null && (
-                            <span className="ml-auto text-gray-400 dark:text-gray-500">
-                              {Math.round(msg.critic_report.score)}/100
-                            </span>
-                          )}
+                          <span className="ml-auto truncate font-mono text-[11px] text-brand">
+                            {msg.generation_id}
+                          </span>
                         </div>
-                        <p className="leading-relaxed text-gray-500 dark:text-gray-400">
-                          {msg.critic_report.reasoning_summary}
-                        </p>
-                      </div>
-                    )}
+                      )}
+                      {msg.critic_report?.reasoning_summary && (
+                        <div className="border-t border-studio px-3 py-2 text-xs leading-relaxed text-muted">
+                          <div className="mb-1 flex items-center gap-2">
+                            <span
+                              className={`h-2 w-2 shrink-0 rounded-full ${
+                                msg.critic_report.decision === 'revise' ? 'bg-warning' : 'bg-success'
+                              }`}
+                            />
+                            <span className="font-semibold text-text-high">
+                              Critic{' '}
+                              {msg.critic_report.decision === 'revise' ? 'requested refinement' : 'accepted output'}
+                            </span>
+                            {msg.critic_report.score != null && (
+                              <span className="ml-auto font-mono text-muted">
+                                {Math.round(msg.critic_report.score)}/100
+                              </span>
+                            )}
+                          </div>
+                          <p>{msg.critic_report.reasoning_summary}</p>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 )}
               </div>
 
               {msg.role === 'user' && (
-                <div className="w-8 h-8 flex-shrink-0 rounded-full bg-gray-200 dark:bg-gray-700 flex items-center justify-center mt-1">
-                  <svg className="w-4 h-4 text-gray-600 dark:text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                      d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                <div className="mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-2xl border border-studio bg-panel text-muted">
+                  <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"
+                    />
                   </svg>
                 </div>
               )}
             </div>
           ))}
 
-          {/* Generation skeleton */}
           {loading && (
-            <div className="flex justify-start gap-3">
-              <div className="w-8 h-8 flex-shrink-0 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center mt-1 animate-pulse">
-                <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                    d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+            <div className="flex gap-3">
+              <div className="mt-1 flex h-8 w-8 shrink-0 animate-pulse items-center justify-center rounded-2xl border border-brand/40 bg-brand/20 text-brand shadow-soft-glow">
+                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"
+                  />
                 </svg>
               </div>
-              <div className="max-w-md w-full space-y-2">
-                {/* Status pill */}
-                <div className="bg-gray-100 dark:bg-gray-800 rounded-2xl rounded-tl-sm px-4 py-2.5 text-sm text-gray-600 dark:text-gray-400 flex items-center gap-2">
-                  <span className="inline-block w-1.5 h-1.5 rounded-full bg-blue-500 animate-bounce" style={{ animationDelay: '0ms' }} />
-                  <span className="inline-block w-1.5 h-1.5 rounded-full bg-blue-500 animate-bounce" style={{ animationDelay: '150ms' }} />
-                  <span className="inline-block w-1.5 h-1.5 rounded-full bg-blue-500 animate-bounce" style={{ animationDelay: '300ms' }} />
-                  <span className="ml-1 animate-pulse">{PROGRESS_STEPS[stepIdx]}</span>
+              <div className="max-w-md flex-1 space-y-3">
+                <div className="flex items-center gap-2 rounded-2xl rounded-tl-md border border-studio bg-panel px-4 py-2.5 text-sm text-muted">
+                  <span
+                    className="inline-block h-1.5 w-1.5 animate-bounce rounded-full bg-brand"
+                    style={{ animationDelay: '0ms' }}
+                  />
+                  <span
+                    className="inline-block h-1.5 w-1.5 animate-bounce rounded-full bg-brand"
+                    style={{ animationDelay: '150ms' }}
+                  />
+                  <span
+                    className="inline-block h-1.5 w-1.5 animate-bounce rounded-full bg-brand"
+                    style={{ animationDelay: '280ms' }}
+                  />
+                  <span className="ml-2 font-medium text-text-high">{loadingStatusChip(PROGRESS_STEPS[stepIdx])}</span>
+                  <span className="truncate text-muted">· {PROGRESS_STEPS[stepIdx]}</span>
                 </div>
 
-                {/* Image skeleton */}
-                <div className="rounded-2xl overflow-hidden border border-gray-200 dark:border-gray-700">
-                  <div className="w-full aspect-square bg-gradient-to-br from-gray-200 via-gray-100 to-gray-200 dark:from-gray-700 dark:via-gray-600 dark:to-gray-700 animate-pulse" />
-                  <div className="px-3 py-2 bg-gray-50 dark:bg-gray-800">
-                    <div className="h-3 w-36 bg-gray-200 dark:bg-gray-700 rounded-full animate-pulse" />
+                <div className="overflow-hidden rounded-2xl border border-studio shadow-inner">
+                  <div className="studio-canvas-grid aspect-square w-full animate-pulse" />
+                  <div className="border-t border-studio bg-panel px-4 py-2">
+                    <div className="mx-auto mb-2 h-2 max-w-[40%] rounded-full bg-brand/30" />
+                    <p className="text-center text-[10px] uppercase tracking-[0.2em] text-muted">
+                      Awaiting lattice composite
+                    </p>
                   </div>
                 </div>
-                <p className="text-xs text-gray-400 dark:text-gray-500 pl-1">
+                <p className="text-xs text-muted">
                   First request may take 60–90s (GPU warm-up)
                 </p>
               </div>
@@ -313,47 +447,47 @@ export default function Workspace({ onGenerateResult, selectedImage }: Workspace
         </div>
       </div>
 
-      {/* Input bar */}
-      <div className="border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-4">
+      <div className="border-t border-studio bg-surface px-5 py-4">
         {messages.length > 0 && !loading && (
-          <div className="max-w-2xl mx-auto flex justify-end mb-2">
+          <div className="mx-auto mb-3 flex max-w-2xl justify-end">
             <button
+              type="button"
               onClick={(e) => {
                 e.preventDefault();
                 setInput("That's the wrong person, start over and generate a new face.");
                 setTimeout(() => handleSend(e), 0);
               }}
-              className="text-xs flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-full transition-colors border border-gray-200 dark:border-gray-700"
+              className="btn-ghost rounded-full text-xs"
               title="Discard current face identity and regenerate from profile"
             >
-              <span>🔄</span> Reroll Face
+              Reroll face
             </button>
           </div>
         )}
-        <form onSubmit={handleSend} className="max-w-2xl mx-auto flex gap-3 items-end">
+        <form onSubmit={handleSend} className="mx-auto flex max-w-2xl items-end gap-3">
           <textarea
             ref={textareaRef}
             rows={1}
             value={input}
             onChange={autoResize}
             onKeyDown={handleKeyDown}
-            placeholder="Describe the suspect… (Enter to send, Shift+Enter for new line)"
+            placeholder="Describe the suspect… (Enter = send)"
             disabled={loading}
-            className="flex-1 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none transition-shadow placeholder-gray-400 dark:placeholder-gray-500"
+            className="input-studio min-h-[48px] max-h-[140px] min-w-0 flex-1 resize-none"
           />
           <button
             type="submit"
             disabled={loading || !input.trim()}
-            className="flex-shrink-0 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed text-white p-3 rounded-xl transition-colors"
+            className="btn-primary flex size-11 shrink-0 items-center justify-center p-0"
             aria-label="Send"
           >
             {loading ? (
-              <svg className="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
+              <svg className="h-5 w-5 animate-spin" fill="none" viewBox="0 0 24 24">
                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
               </svg>
             ) : (
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
               </svg>
             )}

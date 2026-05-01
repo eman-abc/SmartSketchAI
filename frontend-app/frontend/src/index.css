@@ -1,3 +1,76 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@layer base {
+  :root {
+    --bg: #0b1220;
+    --surface: #111827;
+    --surface-strong: #161e35;
+    --text: #f8fafc;
+    --text-muted: #94a3b8;
+    --accent: #38bdf8;
+    --accent-strong: #818cf8;
+    --border-subtle: rgba(148, 163, 184, 0.18);
+  }
+
+  html {
+    @apply antialiased;
+  }
+
+  body {
+    @apply min-h-screen bg-background text-text-high;
+    margin: 0;
+  }
+
+  #root {
+    min-height: 100vh;
+    margin: 0;
+    padding: 0;
+    max-width: none;
+    text-align: left;
+  }
+}
+
+/* Subtle drafting grid inside studio canvas areas */
+.studio-canvas-grid {
+  background-color: #111827;
+  background-image:
+    linear-gradient(rgba(148, 163, 184, 0.055) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(148, 163, 184, 0.055) 1px, transparent 1px);
+  background-size: 20px 20px;
+  box-shadow:
+    inset 0 2px 24px rgba(0, 0, 0, 0.35),
+    inset 0 0 0 1px rgba(148, 163, 184, 0.08);
+}
+
+@layer components {
+  .btn-primary {
+    @apply rounded-2xl bg-brand px-4 py-2.5 text-sm font-semibold text-slate-950 shadow-soft-glow transition duration-200 ease-out hover:bg-brand/90 hover:shadow-soft-glow-hover active:scale-[0.98] disabled:pointer-events-none disabled:opacity-40;
+  }
+
+  .btn-secondary {
+    @apply rounded-2xl border border-studio bg-surface px-4 py-2.5 text-sm font-medium text-text-high transition duration-200 ease-out hover:bg-panel hover:border-studio/80 active:scale-[0.98];
+  }
+
+  .btn-ghost {
+    @apply rounded-2xl px-3 py-2 text-sm font-medium text-muted transition duration-200 ease-out hover:bg-white/5 hover:text-text-high;
+  }
+
+  .input-studio {
+    @apply rounded-2xl border border-studio bg-surface px-4 py-3 text-sm text-text-high outline-none ring-brand/0 transition duration-200 placeholder:text-muted focus:border-studio focus:ring-2 focus:ring-brand/30;
+  }
+
+  .glass-card {
+    @apply rounded-2xl border border-white/10 bg-white/[0.04] backdrop-blur-xl shadow-panel transition duration-200 ease-out hover:border-white/[0.12] hover:shadow-soft-glow;
+  }
+}
+
+@layer utilities {
+  .bg-forensic-studio {
+    background-color: #0b1220;
+    background-image:
+      radial-gradient(circle at top, rgba(56, 189, 248, 0.18), transparent 25%),
+      linear-gradient(180deg, #0b1220 0%, #070b17 100%);
+  }
+}

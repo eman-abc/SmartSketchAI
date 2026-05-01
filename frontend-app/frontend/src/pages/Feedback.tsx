@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
+import ForensicStudioLayout from '../components/layout/ForensicStudioLayout';
 
 function Feedback() {
   const [feedback, setFeedback] = useState('');
@@ -8,45 +9,38 @@ function Feedback() {
 
   const handleFeedbackChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const value = e.target.value;
-    if (value.length <= 2000) {
-      setFeedback(value);
-    }
+    if (value.length <= 2000) setFeedback(value);
   };
 
   return (
-    <div className="flex-1 overflow-y-auto bg-gray-50 p-6">
-      <div className="max-w-3xl mx-auto">
-        {/* Back to Settings Link */}
-        <div className="mb-6">
-          <Link to="/settings" className="text-sm text-gray-600 hover:text-gray-900 flex items-center gap-1 transition-colors">
-            <span>←</span>
-            <span>Back to Settings</span>
-          </Link>
-        </div>
-
-        {/* Main Content Card */}
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-8">
-          {/* Title Section */}
-          <div className="mb-6">
-            <h1 className="text-3xl font-bold text-gray-900 mb-2">Send Feedback</h1>
-            <p className="text-sm text-gray-600">
-              We value your input! Whether it's a bug, a feature idea, or general comments, please let us know.
+    <ForensicStudioLayout
+      navRight={
+        <Link to="/settings" className="btn-ghost rounded-2xl text-xs sm:text-sm">
+          ← Settings
+        </Link>
+      }
+    >
+      <div className="mx-auto max-w-3xl px-4 py-8 sm:px-6 lg:py-10">
+        <div className="glass-card border-studio/80 p-6 shadow-panel sm:p-8">
+          <div className="mb-8 border-b border-studio pb-6">
+            <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.25em] text-muted">Support</p>
+            <h1 className="text-3xl font-semibold tracking-tight text-text-high">Send feedback</h1>
+            <p className="mt-2 text-sm leading-relaxed text-muted">
+              Bugs, features, or workflow friction — detail helps us prioritize.
             </p>
           </div>
 
-          {/* Feedback Form */}
           <div className="space-y-6">
-            {/* Feedback Type Dropdown */}
             <div>
-              <label htmlFor="feedback-type" className="block text-sm font-medium text-gray-700 mb-2">
-                Feedback Type
+              <label htmlFor="feedback-type" className="mb-2 block text-xs font-semibold uppercase tracking-wider text-muted">
+                Feedback type
               </label>
               <div className="relative">
                 <select
                   id="feedback-type"
                   value={feedbackType}
                   onChange={(e) => setFeedbackType(e.target.value)}
-                  className="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm text-gray-900 bg-white appearance-none cursor-pointer focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent pr-10"
+                  className="input-studio w-full cursor-pointer appearance-none pr-10"
                 >
                   <option>General Feedback</option>
                   <option>Bug Report</option>
@@ -54,72 +48,63 @@ function Feedback() {
                   <option>Performance Issue</option>
                   <option>Other</option>
                 </select>
-                <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
-                  <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-3">
+                  <svg className="h-5 w-5 text-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                   </svg>
                 </div>
               </div>
             </div>
 
-            {/* Feedback Textarea */}
             <div>
-              <label htmlFor="feedback-text" className="block text-sm font-medium text-gray-700 mb-2">
-                Your Feedback <span className="text-gray-500 font-normal">{feedback.length}/2000</span>
+              <label htmlFor="feedback-text" className="mb-2 block text-xs font-semibold uppercase tracking-wider text-muted">
+                Your feedback{' '}
+                <span className="font-mono font-normal text-brand/80">({feedback.length}/2000)</span>
               </label>
               <textarea
                 id="feedback-text"
                 value={feedback}
                 onChange={handleFeedbackChange}
-                placeholder="Please provide as much detail as possible..."
+                placeholder="Describe steps, expected vs actual behavior, device, and session context if relevant…"
                 rows={8}
-                className="w-full border border-gray-300 rounded-lg px-4 py-3 text-sm text-gray-900 placeholder-gray-400 resize-none focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent"
+                className="input-studio min-h-[180px] w-full resize-none"
               />
             </div>
 
-            {/* Contact Toggle */}
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-3 rounded-2xl border border-studio bg-surface/50 px-4 py-3">
               <button
                 type="button"
                 onClick={() => setAllowContact(!allowContact)}
-                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-gray-900 focus:ring-offset-2 ${
-                  allowContact ? 'bg-blue-600' : 'bg-gray-300'
+                className={`relative inline-flex h-7 w-12 shrink-0 items-center rounded-full transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-brand/40 focus:ring-offset-2 focus:ring-offset-background ${
+                  allowContact ? 'bg-brand shadow-soft-glow' : 'bg-muted/30'
                 }`}
                 role="switch"
                 aria-checked={allowContact}
               >
                 <span
-                  className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                  className={`inline-block h-5 w-5 transform rounded-full bg-slate-950 shadow transition-transform duration-200 ${
                     allowContact ? 'translate-x-6' : 'translate-x-1'
                   }`}
                 />
               </button>
-              <label htmlFor="contact-toggle" className="text-sm text-gray-700 cursor-pointer">
-                I'm happy to be contacted about this feedback
+              <label className="cursor-pointer text-sm text-text-high">
+                I agree to be contacted about this feedback
               </label>
             </div>
 
-            {/* Action Buttons */}
-            <div className="flex justify-end gap-3 pt-4 border-t border-gray-200">
-              <button
-                type="button"
-                className="px-6 py-2.5 text-sm font-medium text-gray-900 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-900 focus:ring-offset-2 transition-colors"
-              >
+            <div className="flex flex-wrap justify-end gap-3 border-t border-studio pt-6">
+              <Link to="/settings" className="btn-secondary px-6 py-2.5 text-sm">
                 Cancel
-              </button>
-              <button
-                type="button"
-                className="px-6 py-2.5 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:ring-offset-2 transition-colors"
-              >
-                Submit Feedback
+              </Link>
+              <button type="button" className="btn-primary px-6 py-2.5 text-sm shadow-panel">
+                Submit feedback
               </button>
             </div>
           </div>
         </div>
       </div>
-    </div>
+    </ForensicStudioLayout>
   );
 }
 
 export default Feedback;
-

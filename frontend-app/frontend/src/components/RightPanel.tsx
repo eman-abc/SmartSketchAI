@@ -1,20 +1,24 @@
 import { useState } from 'react';
-import type { CriticReport, GenerateResult, EditResult } from '../types';
+import type { CriticReport, GenerateResult, EditResult, ForensicLogEntry } from '../types';
 import { convertSketchStyle, exportForensicReport, ageForensicSketch } from '../lib/api';
+import ForensicConsole from './ForensicConsole';
+import GenerationPipeline from './GenerationPipeline';
 
 type RightPanelProps = {
   generateResult?: GenerateResult | null;
   editResult?: EditResult | null;
   prompt?: string;
-  onUpdateResult?: (result: any) => void;
+  onUpdateResult?: (result: GenerateResult | EditResult | unknown) => void;
+  forensicLogs?: ForensicLogEntry[];
+  isGenerating?: boolean;
 };
 
 type SketchStyle = 'photo' | 'pencil' | 'charcoal';
 
 const STYLE_LABELS: Record<SketchStyle, string> = {
-  photo: '🖼️ Photo',
-  pencil: '✏️ Pencil',
-  charcoal: '🎨 Charcoal',
+  photo: 'Photo',
+  pencil: 'Pencil',
+  charcoal: 'Charcoal',
 };
 
 function scorePercent(value: number | undefined | null): number {
@@ -22,11 +26,13 @@ function scorePercent(value: number | undefined | null): number {
   return Math.round(Math.min(1, Math.max(0, value < 1 ? value : value / 100)) * 100);
 }
 
-export default function RightPanel({ 
-  generateResult = null, 
-  editResult = null, 
+export default function RightPanel({
+  generateResult = null,
+  editResult = null,
   prompt = '',
-  onUpdateResult
+  onUpdateResult,
+  forensicLogs = [],
+  isGenerating = false,
 }: RightPanelProps) {
   const [activeStyle, setActiveStyle] = useState<SketchStyle>('photo');
   const [styleLoading, setStyleLoading] = useState(false);
@@ -44,11 +50,11 @@ export default function RightPanel({
   const currentImage = styledImageUrl ?? baseImageUrl;
 
   const scores = currentResult?.scores ?? {};
-  const rawClip = (scores as Record<string, number | undefined>)?.clip_score ?? (scores as any)?.combined_score;
+  const rawClip = (scores as Record<string, number | undefined>)?.clip_score ?? (scores as Record<string, number>).combined_score;
   const clip = rawClip != null && rawClip > 1 ? Math.round(rawClip) : scorePercent(rawClip);
   const identity = hasEdit
     ? scorePercent(editResult?.identity_score)
-    : scorePercent((generateResult?.scores as any)?.identity_score);
+    : scorePercent(generateResult?.scores?.identity_score);
 
   const meta = (currentResult?.metadata ?? {}) as Record<string, unknown>;
   const seed = meta.seed != null ? String(meta.seed) : '—';
@@ -58,7 +64,6 @@ export default function RightPanel({
   const imageId = hasEdit ? editResult?.id : generateResult?.id;
   const criticReport = (hasEdit ? editResult?.critic_report : generateResult?.critic_report) as CriticReport | null | undefined;
 
-  // ── Sketch style toggle ─────────────────────────────────────────────────
   const handleStyleChange = async (style: SketchStyle) => {
     if (style === activeStyle || styleLoading) return;
 
@@ -76,8 +81,7 @@ export default function RightPanel({
     try {
       const res = await convertSketchStyle({ generation_id: generationId, style });
       setStyledImageUrl(res.styled_image_url ?? null);
-    } catch (err) {
-      console.error('Style conversion failed:', err);
+    } catch {
       setActiveStyle('photo');
       setStyledImageUrl(null);
     } finally {
@@ -85,7 +89,6 @@ export default function RightPanel({
     }
   };
 
-  // ── Export forensic report ─────────────────────────────────────────────
   const handleExport = async () => {
     const generationId = generateResult?.generation_id ?? editResult?.edit_id;
     if (!generationId || exportLoading) return;
@@ -107,7 +110,6 @@ export default function RightPanel({
     }
   };
 
-  // ── Age Progression ───────────────────────────────────────────────────
   const handleAge = async () => {
     const originalImageId = generateResult?.id;
     if (!originalImageId || ageLoading) return;
@@ -118,240 +120,286 @@ export default function RightPanel({
         original_image_id: originalImageId,
         years,
       });
-      // Update the main view with the aged result
-      // The backend returns an EditResult-like object with edited_image_url
-      if (onUpdateResult) {
-        onUpdateResult(res);
-      }
-    } catch (err) {
-      console.error('Age progression failed:', err);
+      onUpdateResult?.(res);
+    } catch {
+      // keep UI quiet — errors surface in workspace if needed
     } finally {
       setAgeLoading(false);
     }
   };
 
+  const scoreBarTone = (value: number) =>
+    value >= 70 ? 'bg-success' : value >= 55 ? 'bg-warning' : 'bg-muted/35';
+
   return (
-    <div className="w-80 bg-gray-50 dark:bg-gray-800 border-l border-gray-200 dark:border-gray-700 overflow-y-auto flex-shrink-0">
-      <div className="p-4 space-y-5">
-
-        {/* ── Preview ─────────────────────────────────────────────────── */}
-        <div>
-          <h2 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">Preview</h2>
-          <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden">
-            <div className="aspect-square bg-gray-100 dark:bg-gray-800 flex items-center justify-center relative">
-              {currentImage ? (
-                <>
-                  <img
-                    src={currentImage}
-                    alt="Forensic sketch"
-                    className={`w-full h-full object-contain transition-opacity duration-300 ${styleLoading ? 'opacity-40' : 'opacity-100'}`}
-                  />
-                  {styleLoading && (
-                    <div className="absolute inset-0 flex items-center justify-center">
-                      <svg className="w-8 h-8 text-blue-500 animate-spin" fill="none" viewBox="0 0 24 24">
-                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                      </svg>
-                    </div>
-                  )}
-                </>
-              ) : (
-                <span className="text-gray-400 dark:text-gray-500 text-sm">No sketch yet</span>
-              )}
-              <div className="absolute bottom-2 right-2 bg-white/80 dark:bg-gray-900/80 backdrop-blur-sm px-2 py-0.5 rounded text-xs font-medium text-gray-500 dark:text-gray-400">
-                RESEARCH USE ONLY
-              </div>
-            </div>
-          </div>
-
-          {/* ── Sketch Style Toggle ───────────────────────────────────── */}
-          {hasGenerate && (
-            <div className="mt-3">
-              <p className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2">Sketch Style</p>
-              <div className="flex gap-1.5">
-                {(Object.keys(STYLE_LABELS) as SketchStyle[]).map(style => (
-                  <button
-                    key={style}
-                    type="button"
-                    onClick={() => handleStyleChange(style)}
-                    disabled={styleLoading}
-                    className={`flex-1 text-xs py-2 px-1 rounded-lg border font-medium transition-all ${
-                      activeStyle === style
-                        ? 'bg-blue-600 border-blue-600 text-white shadow-sm'
-                        : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:border-blue-400 hover:text-blue-600'
-                    } disabled:opacity-50 disabled:cursor-not-allowed`}
-                  >
-                    {STYLE_LABELS[style]}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
+    <div className="flex w-[22rem] shrink-0 flex-col gap-6 overflow-y-auto rounded-3xl border border-studio bg-panel/90 p-6 shadow-panel backdrop-blur-md animate-fade-in">
+      <div className="glass-card p-5 transition duration-200 ease-out hover:-translate-y-1">
+        <div className="mb-4 flex items-center justify-between border-b border-studio pb-3">
+          <h2 className="text-[11px] font-semibold uppercase tracking-[0.2em] text-muted">Sketch preview</h2>
+          {styleLoading ? (
+            <span className="rounded-full bg-warning/15 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-warning">
+              Converting
+            </span>
+          ) : null}
         </div>
-
-        {/* ── Aging & Progression ─────────────────────────────────────── */}
-        {hasGenerate && (
-          <div className="bg-white dark:bg-gray-900 rounded-lg p-4 border border-gray-200 dark:border-gray-700">
-            <h3 className="text-xs font-semibold text-gray-900 dark:text-white uppercase tracking-wider mb-4">Aging & Progression</h3>
-            
-            <div className="space-y-4">
-              <div>
-                <div className="flex justify-between text-[10px] font-medium text-gray-500 dark:text-gray-400 mb-2">
-                  <span>Regression</span>
-                  <span className="text-blue-600 dark:text-blue-400 font-bold text-xs">{years > 0 ? `+${years}` : years} Years</span>
-                  <span>Progression</span>
-                </div>
-                <input
-                  type="range"
-                  min="-40"
-                  max="40"
-                  step="5"
-                  value={years}
-                  onChange={(e) => setYears(parseInt(e.target.value))}
-                  className="w-full h-1.5 bg-gray-200 dark:bg-gray-700 rounded-lg appearance-none cursor-pointer accent-blue-600"
+        <div className="overflow-hidden rounded-2xl border border-studio ring-1 ring-white/10">
+          <div className="relative flex aspect-square items-center justify-center bg-background">
+            {currentImage ? (
+              <>
+                <img
+                  src={currentImage}
+                  alt="Forensic sketch"
+                  className={`absolute inset-0 h-full w-full object-contain transition duration-300 ${
+                    styleLoading ? 'opacity-35 blur-[1px]' : 'opacity-100'
+                  }`}
                 />
-              </div>
-
-              <button
-                type="button"
-                onClick={handleAge}
-                disabled={ageLoading || years === 0}
-                className="w-full flex items-center justify-center gap-2 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-900/50 disabled:opacity-40 border border-blue-200 dark:border-blue-800 py-2 rounded-xl text-xs font-semibold transition-all"
-              >
-                {ageLoading ? (
-                  <>
-                    <svg className="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">
+                <span className="absolute left-3 top-3 rounded-full bg-slate-950/70 px-3 py-1 text-xs font-medium text-slate-200 backdrop-blur-sm">
+                  {styleLoading ? 'Processing…' : 'Preview ready'}
+                </span>
+                {styleLoading && (
+                  <div className="absolute inset-0 flex items-center justify-center">
+                    <svg className="h-8 w-8 animate-spin text-brand" fill="none" viewBox="0 0 24 24" aria-hidden>
                       <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                       <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                     </svg>
-                    Simulating Aging…
-                  </>
-                ) : (
-                  <>
-                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                    </svg>
-                    Apply Progression
-                  </>
-                )}
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Critic Notes */}
-        {criticReport?.reasoning_summary && (
-          <div>
-            <h2 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">Critic Notes</h2>
-            <div className="bg-white dark:bg-gray-900 rounded-lg p-4 border border-gray-200 dark:border-gray-700 space-y-3 text-xs">
-              <div className="flex items-center justify-between gap-2">
-                <span className={`inline-flex items-center gap-1.5 font-semibold ${criticReport.decision === 'revise' ? 'text-yellow-700 dark:text-yellow-300' : 'text-green-700 dark:text-green-300'}`}>
-                  <span className={`w-2 h-2 rounded-full ${criticReport.decision === 'revise' ? 'bg-yellow-500' : 'bg-green-500'}`} />
-                  {criticReport.decision === 'revise' ? 'Revision Suggested' : 'Accepted'}
-                </span>
-                {criticReport.score != null && (
-                  <span className="font-mono text-gray-500 dark:text-gray-400">{Math.round(criticReport.score)}/100</span>
-                )}
-              </div>
-              <p className="text-gray-600 dark:text-gray-300 leading-relaxed">{criticReport.reasoning_summary}</p>
-              {criticReport.missing_features && criticReport.missing_features.length > 0 && (
-                <Row label="Missing" value={criticReport.missing_features.slice(0, 3).join(', ')} wrap />
-              )}
-              {criticReport.prompt_adjustment && (
-                <Row label="Adjustment" value={criticReport.prompt_adjustment} wrap />
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* ── Evaluation Scores ────────────────────────────────────────── */}
-        <div>
-          <h2 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">Evaluation Scores</h2>
-          <div className="space-y-3">
-            {[
-              { label: 'CLIP Score', value: clip, hint: 'Prompt-image alignment' },
-              { label: hasEdit ? 'Identity Preserved' : 'ArcFace', value: identity, hint: 'Face consistency' },
-            ].map(({ label, value, hint }) => (
-              <div key={label} className="bg-white dark:bg-gray-900 rounded-lg p-3 border border-gray-200 dark:border-gray-700">
-                <div className="flex justify-between items-center mb-1">
-                  <div>
-                    <span className="text-xs font-medium text-gray-700 dark:text-gray-300">{label}</span>
-                    <p className="text-xs text-gray-400 dark:text-gray-500">{hint}</p>
                   </div>
-                  <span className={`text-sm font-bold ${value >= 70 ? 'text-green-600 dark:text-green-400' : value >= 55 ? 'text-yellow-600 dark:text-yellow-400' : 'text-gray-400'}`}>
-                    {hasGenerate || hasEdit ? `${value}%` : '—'}
-                  </span>
-                </div>
-                <div className="w-full bg-gray-100 dark:bg-gray-700 rounded-full h-1.5">
-                  <div
-                    className={`h-1.5 rounded-full transition-all duration-500 ${value >= 70 ? 'bg-green-500' : value >= 55 ? 'bg-yellow-500' : 'bg-gray-300 dark:bg-gray-600'}`}
-                    style={{ width: `${value}%` }}
-                  />
-                </div>
-              </div>
-            ))}
-          </div>
-
-          <div className="mt-2 flex gap-4 text-xs text-gray-500 dark:text-gray-400">
-            <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-green-500 inline-block" />≥70 Good</span>
-            <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-yellow-500 inline-block" />55–70 OK</span>
-          </div>
-        </div>
-
-        {/* ── Metadata & Audit ─────────────────────────────────────────── */}
-        <div>
-          <h2 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">Metadata & Audit</h2>
-          <div className="bg-white dark:bg-gray-900 rounded-lg p-4 border border-gray-200 dark:border-gray-700 space-y-3 text-xs">
-            <Row label={hasEdit ? 'Edit Prompt' : 'Prompt'} value={displayPrompt || '—'} wrap />
-            <Row label="Model" value={modelVersion} />
-            <Row label="Seed" value={seed} mono />
-            <Row label={hasEdit ? 'Edit ID' : 'Image ID'} value={imageId != null ? `#${imageId}` : '—'} />
-            <Row label="Audit ID" value={auditId || '—'} mono truncate />
-          </div>
-
-          {/* Export button */}
-          {exportError && (
-            <p className="mt-2 text-xs text-red-500 dark:text-red-400">{exportError}</p>
-          )}
-          <button
-            type="button"
-            onClick={handleExport}
-            disabled={exportLoading || (!hasGenerate && !hasEdit)}
-            className="w-full mt-3 flex items-center justify-center gap-2 bg-gray-900 dark:bg-gray-700 hover:bg-gray-800 dark:hover:bg-gray-600 disabled:opacity-40 disabled:cursor-not-allowed text-white px-4 py-2.5 rounded-xl text-sm font-medium transition-colors"
-          >
-            {exportLoading ? (
-              <>
-                <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                </svg>
-                Generating Report…
+                )}
               </>
             ) : (
-              <>
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                    d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                </svg>
-                Export PDF Forensic Report
-              </>
+              <span className="text-sm text-muted">No sketch yet</span>
             )}
-          </button>
+            <span className="pointer-events-none absolute bottom-3 right-3 select-none text-[10px] font-semibold uppercase tracking-[0.25em] text-muted/70">
+              Research use only
+            </span>
+          </div>
+          <p className="border-t border-studio bg-surface px-3 py-2 text-center text-[10px] uppercase tracking-[0.2em] text-muted">
+            Live composite channel
+          </p>
         </div>
 
+        {hasGenerate && (
+          <div className="mt-4">
+            <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-muted">Sketch mode</p>
+            <div className="flex gap-1.5">
+              {(Object.keys(STYLE_LABELS) as SketchStyle[]).map((style) => (
+                <button
+                  key={style}
+                  type="button"
+                  onClick={() => handleStyleChange(style)}
+                  disabled={styleLoading}
+                  className={`flex-1 rounded-2xl border py-2 text-xs font-semibold transition duration-200 ${
+                    activeStyle === style
+                      ? 'border-brand/45 bg-brand/15 text-brand shadow-soft-glow'
+                      : 'border-studio bg-panel/80 text-muted hover:border-brand/30 hover:text-text-high'
+                  } disabled:pointer-events-none disabled:opacity-40`}
+                >
+                  {STYLE_LABELS[style]}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {hasGenerate && (
+        <div className="glass-card p-5 transition duration-200 ease-out hover:-translate-y-1">
+          <h3 className="mb-4 border-b border-studio pb-3 text-[11px] font-semibold uppercase tracking-[0.2em] text-muted">
+            Aging progression
+          </h3>
+
+          <div className="space-y-4">
+            <div>
+              <div className="mb-2 flex justify-between text-[10px] font-semibold uppercase tracking-wide text-muted">
+                <span>Regression</span>
+                <span className="font-mono text-brand">{years > 0 ? `+${years}` : years} yr</span>
+                <span>Progression</span>
+              </div>
+              <input
+                type="range"
+                min="-40"
+                max="40"
+                step="5"
+                value={years}
+                onChange={(e) => setYears(parseInt(e.target.value, 10))}
+                className="h-1.5 w-full cursor-pointer appearance-none rounded-full bg-muted/25 accent-brand"
+              />
+            </div>
+
+            <button
+              type="button"
+              onClick={handleAge}
+              disabled={ageLoading || years === 0}
+              className="btn-secondary flex w-full items-center justify-center gap-2 border-brand/25 py-2.5 text-xs font-semibold text-brand hover:border-brand/50 hover:bg-brand/10"
+            >
+              {ageLoading ? (
+                <>
+                  <svg className="h-4 w-4 animate-spin text-brand" fill="none" viewBox="0 0 24 24" aria-hidden>
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                  </svg>
+                  Simulating…
+                </>
+              ) : (
+                <>
+                  <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  Apply progression
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+      )}
+
+      <div className="glass-card p-5 transition duration-200 ease-out hover:-translate-y-1">
+        <GenerationPipeline logs={forensicLogs} isGenerating={isGenerating} />
+        <ForensicConsole logs={forensicLogs} />
+      </div>
+
+      {criticReport?.reasoning_summary && (
+        <div className="glass-card p-5 transition duration-200 ease-out hover:-translate-y-1">
+          <h2 className="mb-4 border-b border-studio pb-3 text-[11px] font-semibold uppercase tracking-[0.2em] text-muted">
+            Critic notes
+          </h2>
+          <div className="space-y-3 text-xs leading-relaxed text-muted">
+            <div className="flex items-center justify-between gap-2">
+              <span
+                className={`inline-flex items-center gap-1.5 font-semibold ${
+                  criticReport.decision === 'revise' ? 'text-warning' : 'text-success'
+                }`}
+              >
+                <span
+                  className={`h-2 w-2 shrink-0 rounded-full ${
+                    criticReport.decision === 'revise' ? 'bg-warning' : 'bg-success'
+                  }`}
+                />
+                {criticReport.decision === 'revise' ? 'Revision suggested' : 'Accepted'}
+              </span>
+              {criticReport.score != null && (
+                <span className="font-mono text-text-high">{Math.round(criticReport.score)}/100</span>
+              )}
+            </div>
+            <p className="text-text-high/90">{criticReport.reasoning_summary}</p>
+            {criticReport.missing_features && criticReport.missing_features.length > 0 && (
+              <Row label="Missing" value={criticReport.missing_features.slice(0, 3).join(', ')} wrap />
+            )}
+            {criticReport.prompt_adjustment && (
+              <Row label="Adjustment" value={criticReport.prompt_adjustment} wrap />
+            )}
+          </div>
+        </div>
+      )}
+
+      <div className="glass-card p-5 transition duration-200 ease-out hover:-translate-y-1">
+        <h2 className="mb-4 border-b border-studio pb-3 text-[11px] font-semibold uppercase tracking-[0.2em] text-muted">
+          Evaluation scores
+        </h2>
+        <div className="space-y-4">
+          {[
+            { label: 'CLIP score', value: clip, hint: 'Prompt alignment' },
+            { label: hasEdit ? 'Identity preserved' : 'ArcFace', value: identity, hint: 'Face consistency' },
+          ].map(({ label, value, hint }) => (
+            <div key={label}>
+              <div className="mb-1 flex items-center justify-between">
+                <div>
+                  <span className="text-xs font-medium text-text-high">{label}</span>
+                  <p className="text-[11px] text-muted">{hint}</p>
+                </div>
+                <span
+                  className={`font-mono text-sm font-semibold ${
+                    value >= 70 ? 'text-success' : value >= 55 ? 'text-warning' : 'text-muted'
+                  }`}
+                >
+                  {hasGenerate || hasEdit ? `${value}%` : '—'}
+                </span>
+              </div>
+              <div className="h-1.5 overflow-hidden rounded-full bg-muted/20">
+                <div
+                  className={`h-full rounded-full transition-[width] duration-500 ease-out ${scoreBarTone(value)}`}
+                  style={{ width: `${value}%` }}
+                />
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="mt-3 flex flex-wrap gap-x-5 gap-y-2 text-[11px] text-muted">
+          <span className="inline-flex items-center gap-2">
+            <span className="h-2 w-2 shrink-0 rounded-full bg-success" />
+            Good ≥70
+          </span>
+          <span className="inline-flex items-center gap-2">
+            <span className="h-2 w-2 shrink-0 rounded-full bg-warning" />
+            OK 55–70
+          </span>
+        </div>
+      </div>
+
+      <div className="glass-card p-5 transition duration-200 ease-out hover:-translate-y-1">
+        <h2 className="mb-4 border-b border-studio pb-3 text-[11px] font-semibold uppercase tracking-[0.2em] text-muted">
+          Metadata audit
+        </h2>
+        <div className="space-y-3 text-xs">
+          <Row label={hasEdit ? 'Edit prompt' : 'Prompt'} value={displayPrompt || '—'} wrap />
+          <Row label="Model" value={modelVersion} />
+          <Row label="Seed" value={seed} mono />
+          <Row label={hasEdit ? 'Edit ID' : 'Image ID'} value={imageId != null ? `#${imageId}` : '—'} />
+          <Row label="Audit ID" value={auditId || '—'} mono truncate />
+        </div>
+
+        {exportError && <p className="mt-3 text-xs text-danger">{exportError}</p>}
+        <button
+          type="button"
+          onClick={handleExport}
+          disabled={exportLoading || (!hasGenerate && !hasEdit)}
+          className="btn-secondary mt-4 flex w-full items-center justify-center gap-2 border border-studio py-3 text-sm font-semibold hover:border-brand/40 hover:shadow-soft-glow disabled:pointer-events-none disabled:opacity-40"
+        >
+          {exportLoading ? (
+            <>
+              <svg className="h-4 w-4 animate-spin text-brand" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+              </svg>
+              Generating PDF…
+            </>
+          ) : (
+            <>
+              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+                />
+              </svg>
+              Export PDF report
+            </>
+          )}
+        </button>
       </div>
     </div>
   );
 }
 
-// Small helper component
 function Row({
-  label, value, mono = false, wrap = false, truncate = false,
-}: { label: string; value: string; mono?: boolean; wrap?: boolean; truncate?: boolean }) {
+  label,
+  value,
+  mono = false,
+  wrap = false,
+  truncate = false,
+}: {
+  label: string;
+  value: string;
+  mono?: boolean;
+  wrap?: boolean;
+  truncate?: boolean;
+}) {
   return (
-    <div className={`flex ${wrap ? 'flex-col gap-1' : 'justify-between items-start gap-2'}`}>
-      <span className="text-gray-500 dark:text-gray-400 flex-shrink-0">{label}:</span>
-      <span className={`text-gray-900 dark:text-white font-medium text-right ${mono ? 'font-mono' : ''} ${truncate ? 'truncate max-w-[140px]' : ''} ${wrap ? 'text-left' : ''}`}>
+    <div className={`flex ${wrap ? 'flex-col gap-1' : 'items-start justify-between gap-2'}`}>
+      <span className="shrink-0 text-muted">{label}</span>
+      <span
+        className={`text-right font-medium text-text-high ${mono ? 'font-mono text-[11px] text-brand/90' : ''} ${truncate ? 'max-w-[10rem] truncate' : ''} ${wrap ? 'text-left' : ''}`}
+      >
         {value}
       </span>
     </div>
