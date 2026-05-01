@@ -190,14 +190,14 @@ ADDED
 
 ## ✅ Final Defence Checklist
 
-- [ ] `[BACKEND]` `pickle` fully replaced with `json` in `persistence.py`
-- [ ] `[ML]` GPU upgraded to `L4` or `empty_cache()` added between nodes
+- [m] `[BACKEND]` `pickle` fully replaced with `json` in `persistence.py`
+- [x] `[ML]` GPU upgraded to `L4` or `empty_cache()` added between nodes
 - [x] `[FRONTEND]` `GlobalErrorBoundary` wrapping app root
-- [ ] `[BACKEND]` Self-healing JSON parser live in `agent_nodes.py`
-- [ ] `[BACKEND]` Async `httpx` calls replacing blocking `requests.post`
+- [x] `[BACKEND]` Self-healing JSON parser live in `agent_nodes.py`
+- [m] `[BACKEND]` Async `httpx` calls replacing blocking `requests.post`
 - [ ] `[BACKEND]` SSE streaming endpoint in `views.py`
 - [ ] `[FRONTEND]` Forensic Console real-time log in `RightPanel`
-- [ ] `[BACKEND]` SHA-256 hashes visible in `RightPanel` Metadata
+<!-- - [ ] `[BACKEND]` SHA-256 hashes visible in `RightPanel` Metadata -->
 - [ ] `[BACKEND]` Performance load test run + results screenshot captured
 - [ ] `[BACKEND]` GitHub Action CI shows green ✅
 - [ ] `[BACKEND/ML]` Forensic Dossier PDF export functional (WOW)

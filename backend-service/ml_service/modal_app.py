@@ -239,8 +239,10 @@ class SmartSketchService:
                 return {"success": False, "error": "system_prompt and user_message required"}
 
             try:
-                # Use the already loaded validator (Qwen 3B) for general LLM tasks
-                response = self.pipeline.validator._call_llm(system_prompt, user_message)
+                response = self._analyze_with_self_healing(system_prompt, user_message)
+                if response is None:
+                    return {"success": False, "error": "Unable to produce valid JSON after retries"}
+
                 return {
                     "success":  True,
                     "response": response,
@@ -250,6 +252,73 @@ class SmartSketchService:
                 return {"success": False, "error": str(e)}
         finally:
             _cleanup_cuda()
+
+    def _analyze_with_self_healing(self, system_prompt: str, user_message: str, max_retries: int = 3) -> str | None:
+        """Call the local validator and retry if the response cannot be parsed as valid JSON."""
+        prompt = user_message
+
+        for attempt in range(1, max_retries + 1):
+            response = self.pipeline.validator._call_llm(system_prompt, prompt)
+            candidate = self._extract_valid_json(response)
+            if candidate is not None:
+                return candidate
+
+            if attempt < max_retries:
+                prompt = (
+                    "The previous response was not valid JSON. "
+                    f"Please reply with only valid JSON matching the expected schema.\n"
+                    "Do not include any markdown fences, explanatory text, or code blocks.\n"
+                    "Here is the original user message:\n"
+                    f"{user_message}\n"
+                    "Previous invalid response:\n"
+                    f"{response}\n"
+                )
+
+        return None
+
+    def _extract_valid_json(self, text: str) -> str | None:
+        """Extract and normalize the first valid JSON object from the LLM text."""
+        cleaned = text.strip()
+        cleaned = re.sub(r'^```(?:json)?\s*', '', cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r'\s*```$', '', cleaned, flags=re.IGNORECASE)
+
+        candidates = self._find_json_objects(cleaned)
+        if not candidates:
+            candidates = [cleaned]
+
+        for candidate in candidates:
+            candidate = self._normalize_json_text(candidate)
+            try:
+                json.loads(candidate)
+                return candidate
+            except json.JSONDecodeError:
+                continue
+
+        return None
+
+    def _find_json_objects(self, text: str) -> list[str]:
+        """Find balanced JSON object substrings in the text."""
+        candidates = []
+        depth = 0
+        start = None
+        for idx, char in enumerate(text):
+            if char == '{':
+                if depth == 0:
+                    start = idx
+                depth += 1
+            elif char == '}' and depth > 0:
+                depth -= 1
+                if depth == 0 and start is not None:
+                    candidates.append(text[start:idx + 1])
+                    start = None
+
+        return candidates
+
+    def _normalize_json_text(self, text: str) -> str:
+        """Remove common JSON formatting issues from LLM output."""
+        text = re.sub(r',\s*([\]}])', r'\1', text)
+        text = text.strip()
+        return text
 
 
 @app.cls(
