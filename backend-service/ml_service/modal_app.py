@@ -24,43 +24,19 @@ LOCAL_ML_ENGINE = Path(__file__).parent.parent / "ml_engine"
 
 image = (
     modal.Image.debian_slim(python_version="3.11")
-    .run_commands("apt-get update && apt-get install -y git libgl1 libglib2.0-0")
-    .pip_install(
-        "numpy==1.26.4",
-        "Pillow>=10.0.0",
-    )
-    .pip_install(
-        "torch==2.5.1",
-        "torchvision==0.20.1",
-        "xformers",
-        extra_index_url="https://download.pytorch.org/whl/cu121",
-    )
-    .pip_install(
-        "diffusers==0.30.3",
-        "transformers==4.44.2",
-        "accelerate==0.34.2",
-        "safetensors==0.4.4",
-        "huggingface_hub==0.25.2",
-        "bitsandbytes==0.43.3",
-        "controlnet-aux==0.0.9",
-        "opencv-python-headless==4.10.0.84",
-        "scikit-image==0.24.0",
-        "mediapipe",
-        "invisible-watermark",
-        "langgraph>=1.1.5",
-        "langchain-core>=1.2.10",
-        "pydantic>=2.0",
-        "fastapi",
-        "uvicorn",
-        "gfpgan",
-        "facexlib",
-        "basicsr",
-    )
+    .run_commands("apt-get update && apt-get install -y git libgl1 libglib2.0-0 curl")
     .run_commands(
-        "pip install git+https://github.com/openai/CLIP.git",
-        "pip install facenet-pytorch --no-deps",
-        "pip install mtcnn",
-        "wget https://github.com/TencentARC/GFPGAN/releases/download/v1.3.0/GFPGANv1.4.pth -P /models",
+        "pip install --upgrade pip setuptools wheel",
+        "pip install numpy==1.26.4",
+        "pip install -q Pillow>=10.0.0 requests>=2.28.0 tqdm fastapi uvicorn",
+        "pip install -q torch==2.5.1 torchvision==0.20.1 --index-url https://download.pytorch.org/whl/cu121",
+        "pip install -q diffusers==0.30.3 transformers==4.44.2 accelerate==0.34.2 safetensors==0.4.4 huggingface_hub==0.25.2 bitsandbytes==0.43.3 xformers",
+        "pip install -q controlnet-aux==0.0.9 opencv-python-headless==4.10.0.84 scikit-image==0.24.0 mediapipe invisible-watermark mtcnn",
+        "pip install -q langgraph>=1.1.5 langchain-core>=1.2.10 pydantic>=2.0",
+        "pip install -q gfpgan facexlib basicsr",
+        "pip install -q facenet-pytorch --no-deps",
+        "pip install -q git+https://github.com/openai/CLIP.git",
+        "mkdir -p /models && curl -L -o /models/GFPGANv1.4.pth https://github.com/TencentARC/GFPGAN/releases/download/v1.3.0/GFPGANv1.4.pth",
     )
     .add_local_dir(
         LOCAL_ML_ENGINE,
@@ -108,8 +84,12 @@ class SmartSketchService:
             lora_path=None,
             device="cuda",
             enable_offload=True,
+            enable_sketch=True,
+            enable_editing=True,
+            enable_inpainting=True,
+            enable_restoration=True,
         )
-        print("[SmartSketch] ✅ Pipeline ready")
+        print("[SmartSketch] ✅ All models loaded in-memory (SDXL, Qwen, CLIP, GFPGAN)")
 
     # ─────────────────────────────────────────────────────────────────────────
     @modal.method()
@@ -225,6 +205,30 @@ class SmartSketchService:
             "years":          years,
         }
 
+    # ─────────────────────────────────────────────────────────────────────────
+    @modal.method()
+    def analyze(self, body: dict) -> dict:
+        """
+        Uses the on-GPU Qwen model to perform forensic analysis and routing.
+        Acts as a high-reliability fallback for Gemini.
+        """
+        system_prompt = body.get("system_prompt")
+        user_message  = body.get("user_message")
+
+        if not system_prompt or not user_message:
+            return {"success": False, "error": "system_prompt and user_message required"}
+
+        try:
+            # Use the already loaded validator (Qwen 3B) for general LLM tasks
+            response = self.pipeline.validator._call_llm(system_prompt, user_message)
+            return {
+                "success":  True,
+                "response": response,
+                "model":    "qwen-2.5-3b-fallback"
+            }
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
 
 # ── 6. Helper serializers ─────────────────────────────────────────────────────
 def _pil_to_b64(img) -> str:
@@ -265,6 +269,12 @@ def fastapi_app():
     async def age(request: Request):
         body   = await request.json()
         result = service.age.remote(body)
+        return JSONResponse(result)
+
+    @web_app.post("/analyze")
+    async def analyze(request: Request):
+        body   = await request.json()
+        result = service.analyze.remote(body)
         return JSONResponse(result)
 
     return web_app

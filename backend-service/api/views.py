@@ -409,6 +409,129 @@ def edit_forensic_sketch(request):
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
+def age_forensic_sketch(request):
+    user = request.user
+    original_image_id = request.data.get("original_image_id")
+    years = request.data.get("years", 10)
+
+    if not original_image_id:
+        return Response({"error": "original_image_id is required"}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        years = int(years)
+    except (TypeError, ValueError):
+        return Response({"error": "years must be an integer"}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        generated_image = GeneratedImage.objects.get(pk=original_image_id, user=user)
+    except GeneratedImage.DoesNotExist:
+        return Response({"error": "Original image not found"}, status=status.HTTP_404_NOT_FOUND)
+
+    # 1. Try Colab/Modal
+    if COLAB_ML_URL:
+        _base = COLAB_ML_URL.rstrip('/')
+        if _base.endswith('/generate') or _base.endswith('/edit') or _base.endswith('/age'):
+            _base = _base.rsplit('/', 1)[0]
+        ml_url = f"{_base}/age"
+        try:
+            with generated_image.image_file.open('rb') as f:
+                original_image_b64 = base64.b64encode(f.read()).decode('utf-8')
+            
+            ml_resp = requests.post(
+                ml_url,
+                json={
+                    "generation_id": f"gen_{generated_image.id}",
+                    "original_image": original_image_b64,
+                    "years": years,
+                },
+                headers={
+                    "ngrok-skip-browser-warning": "1",
+                    "User-Agent": "SmartSketch-Django/1.0",
+                },
+                timeout=120,
+            )
+            
+            if ml_resp.status_code == 200:
+                ml_data = ml_resp.json()
+                if ml_data.get("success"):
+                    edited_image_b64 = ml_data.get("edited_image")
+                    if edited_image_b64:
+                        edited_bytes = base64.b64decode(edited_image_b64)
+                        edit_id = ml_data.get("edit_id") or f"age_{generated_image.id}"
+                        edited_file = ContentFile(edited_bytes, name=f"{edit_id}.png")
+
+                        edited = EditedImage.objects.create(
+                            user=user,
+                            original_image=generated_image,
+                            edit_prompt=f"Age progression: {years} years",
+                            edited_file=edited_file,
+                        )
+
+                        scores = ml_data.get("scores") or {}
+                        identity_score = ml_data.get("identity_score", 0)
+
+                        ImageScore.objects.create(
+                            edited_image=edited,
+                            clip_score=scores.get("clip_score"),
+                            identity_score=identity_score,
+                            final_score=scores.get("combined_score"),
+                        )
+
+                        return Response({
+                            "id": edited.id,
+                            "original_image_id": generated_image.id,
+                            "edited_image_url": request.build_absolute_uri(edited.edited_file.url),
+                            "years": years,
+                            "identity_score": identity_score,
+                            "provider": "colab"
+                        }, status=status.HTTP_200_OK)
+        except Exception as colab_e:
+            print(f"⚠️ Colab ML age failed: {colab_e}")
+
+    # 2. Try Local Fallback
+    ml_config = getattr(settings, 'ML_CONFIG', {})
+    if ml_config.get('USE_LOCAL_ML', False):
+        try:
+            from PIL import Image
+            with generated_image.image_file.open('rb') as f:
+                pil_image = Image.open(f).convert('RGB')
+
+            pipeline = MLService.get_pipeline()
+            ml_data = pipeline.age_progression(
+                generation_id=str(generated_image.id),
+                original_image=pil_image,
+                years=years
+            )
+
+            if ml_data.get("success"):
+                edited_pil = ml_data.get("edited_image")
+                edit_id = ml_data.get("edit_id")
+                edited_file = pil_to_content_file(edited_pil, f"{edit_id}.png")
+
+                edited = EditedImage.objects.create(
+                    user=user,
+                    original_image=generated_image,
+                    edit_prompt=f"Age progression: {years} years",
+                    edited_file=edited_file,
+                )
+
+                return Response({
+                    "id": edited.id,
+                    "original_image_id": generated_image.id,
+                    "edited_image_url": request.build_absolute_uri(edited.edited_file.url),
+                    "years": years,
+                    "provider": "local"
+                }, status=status.HTTP_200_OK)
+        except Exception as local_e:
+            print(f"⚠️ Local ML age failed: {local_e}")
+
+    return Response(
+        {"error": "ML age failed. Colab service unavailable and local ML disabled/failed."},
+        status=status.HTTP_503_SERVICE_UNAVAILABLE
+    )
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
 def agent_chat(request):
     """
     Stateful conversational endpoint for the Forensic Agent.

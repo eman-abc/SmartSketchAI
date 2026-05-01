@@ -22,8 +22,9 @@ class AnalyzerNode:
     (or a simple keyword heuristic when no LLM is configured).
     """
 
-    def __init__(self, llm=None):
+    def __init__(self, llm=None, remote_url: Optional[str] = None):
         self.llm = llm
+        self.remote_url = remote_url
 
     def __call__(self, state: ForensicAgentState) -> Dict[str, Any]:
         print("\n--- ANALYZING USER INPUT ---")
@@ -32,15 +33,34 @@ class AnalyzerNode:
         last_message = last_msg.content if hasattr(last_msg, "content") else str(last_msg)
         current_profile = state["suspect_profile"]
 
-        if self.llm is None:
+        system_prompt = self._build_system_prompt(current_profile)
+        
+        response_content = None
+        try:
+            if self.llm:
+                response = self.llm.invoke([
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user",   "content": last_message},
+                ])
+                response_content = response.content
+            else:
+                print("[Analyzer] No LLM configured - skipping to fallback/mock")
+        except Exception as e:
+            print(f"[Analyzer] Primary LLM failed: {e}. Attempting Modal fallback...")
+
+        # --- Tier 2: Modal Fallback (Qwen on GPU) ---
+        if response_content is None and self.remote_url:
+            try:
+                response_content = self._call_modal_analyze(system_prompt, last_message)
+            except Exception as e:
+                print(f"[Analyzer] Modal fallback failed: {e}")
+
+        # --- Tier 3: Heuristic Mock (Final fallback) ---
+        if response_content is None:
+            print("[Analyzer] All LLMs failed. Using heuristic fallback.")
             return self._mock_llm_logic(last_message, current_profile)
 
-        system_prompt = self._build_system_prompt(current_profile)
-        response = self.llm.invoke([
-            {"role": "system", "content": system_prompt},
-            {"role": "user",   "content": last_message},
-        ])
-        updated_profile_data = self._parse_json(response.content)
+        updated_profile_data = self._parse_json(response_content)
 
         intent = updated_profile_data.get("intent", "edit")
         enhanced = updated_profile_data.get("enhanced_prompt")
@@ -104,6 +124,35 @@ INSTRUCTIONS:
         except Exception:
             pass
         return {}
+
+    def _call_modal_analyze(self, system_prompt: str, user_message: str) -> Optional[str]:
+        """Calls the /analyze endpoint on Modal to use Qwen as a fallback LLM."""
+        import requests
+        
+        base = self.remote_url.rstrip("/")
+        # Ensure we hit the base /analyze endpoint
+        for suffix in ["/generate", "/edit", "/age", "/analyze"]:
+            if base.endswith(suffix):
+                base = base.rsplit("/", 1)[0]
+        
+        try:
+            print(f"[Analyzer] Calling Modal fallback: {base}/analyze")
+            resp = requests.post(
+                f"{base}/analyze",
+                json={
+                    "system_prompt": system_prompt,
+                    "user_message":  user_message
+                },
+                timeout=30 # LLM analysis should be fast
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                if data.get("success"):
+                    print("[Analyzer] ✅ Modal fallback successful")
+                    return data.get("response")
+        except Exception as e:
+            print(f"[Analyzer] Modal request error: {e}")
+        return None
 
     def _mock_llm_logic(self, message: str, profile: SuspectProfile) -> Dict[str, Any]:
         """Keyword heuristic for smoke-testing without a real LLM."""

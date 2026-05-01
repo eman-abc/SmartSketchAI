@@ -42,7 +42,7 @@ class SmartSketchAgent:
         self.checkpointer = checkpointer or DjangoCheckpointer()
 
         # Nodes
-        self.analyzer = AnalyzerNode(llm=llm)
+        self.analyzer = AnalyzerNode(llm=llm, remote_url=remote_url)
         self.router   = RouterNode()
         self.verifier = VerificationNode(
             scorer=pipeline.scorer if pipeline else None

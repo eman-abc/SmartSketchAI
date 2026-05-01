@@ -174,6 +174,17 @@ export async function editForensicSketch(body: {
   });
 }
 
+/** POST /api/forensic/age/ */
+export async function ageForensicSketch(body: {
+  original_image_id: number;
+  years: number;
+}) {
+  return request<any>('forensic/age/', {
+    method: 'POST',
+    body,
+  });
+}
+
 /** GET /api/my-images/ */
 export async function fetchUserImages() {
   return request<any[]>('my-images/', {

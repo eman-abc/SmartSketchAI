@@ -3,7 +3,7 @@ from django.urls import path
 from .views import (
     RegisterView, ProfileView, MyGeneratedImagesView, AuditLogListView,
     ForensicRequestCreateView, ForensicApproveView,
-    generate_forensic_sketch, edit_forensic_sketch, agent_chat,
+    generate_forensic_sketch, edit_forensic_sketch, age_forensic_sketch, agent_chat,
     sketch_style_view, export_report_view, health_check,
 )
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
@@ -19,6 +19,7 @@ urlpatterns = [
     path('forensic-requests/<int:pk>/approve/', ForensicApproveView.as_view(), name='forensic_approve'),
     path("forensic/generate/", generate_forensic_sketch),
     path("forensic/edit/", edit_forensic_sketch),
+    path("forensic/age/", age_forensic_sketch),
     path("forensic/chat/", agent_chat),
     path("forensic/sketch-style/", sketch_style_view, name="sketch_style"),
     path("forensic/export-report/", export_report_view, name="export_report"),

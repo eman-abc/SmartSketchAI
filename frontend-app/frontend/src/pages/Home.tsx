@@ -44,6 +44,7 @@ function Home() {
         <RightPanel
           generateResult={generateResult}
           prompt={currentPrompt}
+          onUpdateResult={(res) => handleGenerateResult(res, currentPrompt)}
         />
       </div>
     </div>

@@ -1,0 +1,21 @@
+C:\SmartSketch_Workspace\backend-service\venv\Lib\site-packages\modal\_utils\async_utils.py:45: DeprecationWarning: 'asyncio.WindowsSelectorEventLoopPolicy' is deprecated and slated for removal in Python 3.16
+  asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+C:\SmartSketch_Workspace\backend-service\venv\Lib\site-packages\modal\_utils\async_utils.py:45: DeprecationWarning: 'asyncio.set_event_loop_policy' is deprecated and slated for removal in Python 3.16
+  asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+Building image im-ow0FCxC9ernqyVnakY7k20
+
+=> Step 0: FROM base
+
+=> Step 1: RUN python -m pip install mtcnn
+Looking in indexes: http://pypi-mirror.modal.local:5555/simple
+Collecting mtcnn
+  Downloading http://pypi-mirror.modal.local:5555/simple/mtcnn/mtcnn-1.0.0-py3-none-any.whl.metadata (5.8 kB)
+Collecting joblib>=1.4.2 (from mtcnn)
+  Downloading http://pypi-mirror.modal.local:5555/simple/joblib/joblib-1.5.3-py3-none-any.whl.metadata (5.5 kB)
+Collecting lz4>=4.3.3 (from mtcnn)
+  Downloading http://pypi-mirror.modal.local:5555/simple/lz4/lz4-4.4.5-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (3.8 kB)
+Downloading http://pypi-mirror.modal.local:5555/simple/mtcnn/mtcnn-1.0.0-py3-none-any.whl (1.9 MB)
++- Error ---------------------------------------------------------------------+
+| 'charmap' codec can't encode characters in position 3-42: character maps to |
+| <undefined>                                                                 |
++-----------------------------------------------------------------------------+
