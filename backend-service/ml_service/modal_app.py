@@ -52,7 +52,7 @@ image = (
 
 # ── 3. Persistent volume — model weights survive container restarts ───────────
 volume = modal.Volume.from_name("smartsketch-models", create_if_missing=True)
-MODEL_DIR = "/models"
+MODEL_DIR = "/modal_models"
 
 # ── 4. Modal app ─────────────────────────────────────────────────────────────
 app = modal.App("smartsketch-ml", image=image)
