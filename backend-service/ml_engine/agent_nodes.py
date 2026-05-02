@@ -14,6 +14,73 @@ from .agent_state import ForensicAgentState, SuspectProfile
 from .critic import ForensicCriticClient, normalize_critic_report
 
 
+def sanitize_negative_prompt(
+    negative: Optional[str],
+    profile: SuspectProfile,
+    max_len: int = 500,
+) -> Optional[str]:
+    """
+    Drop comma-separated negative clauses that are substrings of the positive
+    profile description (common /analyze mistake: negating desired traits).
+    """
+    if not negative or not str(negative).strip():
+        return None
+    profile_text = profile.to_detailed_prompt().lower()
+    if not profile_text or profile_text == "a person":
+        out = str(negative).strip()[:max_len]
+        return out or None
+
+    kept: List[str] = []
+    for part in str(negative).split(","):
+        p = part.strip()
+        if len(p) < 3:
+            continue
+        pl = p.lower()
+        if len(pl) >= 6 and pl in profile_text:
+            continue
+        kept.append(p)
+
+    joined = ", ".join(kept).strip()[:max_len]
+    return joined or None
+
+
+def build_initial_generation_prompt(state: Dict[str, Any]) -> str:
+    """
+    First-turn (or full regenerate) prompt: user's words + analyzer enhancement
+    + structured profile so Modal sees the full forensic brief.
+    """
+    profile: SuspectProfile = state.get("suspect_profile") or SuspectProfile()
+    profile_str = profile.to_detailed_prompt()
+
+    last_msg = state["messages"][-1]
+    if isinstance(last_msg, dict):
+        raw = (last_msg.get("content") or "").strip()
+    else:
+        raw = (last_msg.content if hasattr(last_msg, "content") else str(last_msg))
+        raw = (raw or "").strip()
+    if raw.startswith("[system_action:"):
+        raw = ""
+
+    enhanced = (state.get("enhanced_prompt") or "").strip()
+
+    pieces: List[str] = []
+    if raw:
+        pieces.append(raw)
+    if enhanced and enhanced.lower() not in raw.lower():
+        pieces.append(enhanced)
+    if profile_str:
+        pieces.append(profile_str)
+
+    core = ", ".join(p for p in pieces if p)
+    if not core:
+        core = "realistic adult face, neutral expression, single subject"
+
+    return (
+        "professional forensic photograph, mugshot style, frontal portrait, "
+        f"{core}, realistic skin texture, single subject, neutral background, high detail"
+    )
+
+
 # ---------------------------------------------------------------------------
 # 1. AnalyzerNode — reads user message, updates SuspectProfile
 # ---------------------------------------------------------------------------
@@ -60,7 +127,10 @@ class AnalyzerNode:
         # --- Tier 3: Heuristic Mock (Final fallback) ---
         if response_content is None:
             print("[Analyzer] All LLMs failed. Using heuristic fallback.")
-            return self._mock_llm_logic(last_message, current_profile)
+            out = self._mock_llm_logic(last_message, current_profile)
+            out["iteration_count"] = state.get("iteration_count", 0) + 1
+            out["ml_attempt_count"] = 0
+            return out
 
         updated_profile_data = self._parse_json(response_content)
 
@@ -74,6 +144,7 @@ class AnalyzerNode:
         base = current_profile.model_dump()
         base.update({k: v for k, v in profile_fields.items() if v is not None and k in base})
         updated_profile = SuspectProfile(**base)
+        negative = sanitize_negative_prompt(negative, updated_profile)
 
         print(f"[Analyzer] Profile updated: {updated_profile.model_dump_json()}")
         print(f"[Analyzer] Intent: {intent} | Enhanced: {enhanced[:40] if enhanced else None} | Negative: {negative}")
@@ -82,11 +153,12 @@ class AnalyzerNode:
         
         return {
             "suspect_profile": updated_profile,
-            "iteration_count": state["iteration_count"] + 1,
+            "iteration_count": state.get("iteration_count", 0) + 1,
+            "ml_attempt_count": 0,
             "user_intent": intent,
             "enhanced_prompt": enhanced,
             "negative_prompt": negative,
-            "age_params": age_params
+            "age_params": age_params,
         }
 
     def _build_system_prompt(self, profile: SuspectProfile) -> str:
@@ -145,7 +217,7 @@ INSTRUCTIONS:
                     "system_prompt": system_prompt,
                     "user_message":  user_message
                 },
-                timeout=30 # LLM analysis should be fast
+                timeout=120 # LLM analysis should be fast, but allow for cold start
             )
             if resp.status_code == 200:
                 data = resp.json()
@@ -167,10 +239,16 @@ INSTRUCTIONS:
         if age_match:
             num = next(g for g in age_match.groups() if g is not None)
             low = int(num)
-            data["age_range"] = f"{low}-{low + 9}"
+            # Calibration: mid-40s should be ~42-47, not 40-49 to avoid over-aging
+            if "early" in msg:
+                data["age_range"] = f"{low}-{low+3}"
+            elif "late" in msg:
+                data["age_range"] = f"{low+6}-{low+9}"
+            else:
+                data["age_range"] = f"{low+2}-{low+7}"
         elif re.search(r'\b(\d{2,3})\b', msg):
             n = re.search(r'\b(\d{2,3})\b', msg).group(1)
-            data["age_range"] = f"{n}-{int(n)+5}"
+            data["age_range"] = f"{n}-{int(n)+3}"
 
         # --- Gender ---
         if "male" in msg or " man" in msg:
@@ -270,9 +348,9 @@ class RouterNode:
 
         has_image = state.get("current_image") is not None
 
-        # First turn: always generate from scratch
+        # First turn: always generate from scratch using profile + user prompt (see build_initial_generation_prompt)
         if not has_image:
-            print("[Router] No image yet → GENERATE")
+            print("[Router] No image yet -> GENERATE (from user prompt + profile)")
             return {
                 "next_step": "generate",
                 "generation_params": {"target_region": None, "use_controlnet": False},
@@ -284,7 +362,7 @@ class RouterNode:
 
         # 1. Hardware/UI bypass for immediate regeneration
         if msg_text == "[system_action: regenerate]":
-            print("[Router] UI action detected → GENERATE (Resetting Identity)")
+            print("[Router] UI action detected -> GENERATE (Resetting Identity)")
             return {
                 "next_step": "generate",
                 "generation_params": {"target_region": None, "use_controlnet": False},
@@ -293,15 +371,54 @@ class RouterNode:
         # 2. LLM Semantic Routing
         user_intent = state.get("user_intent")
         if user_intent == "generate" or any(kw in msg_text for kw in self.REGENERATE_TRIGGERS):
-            print("[Router] 'Wrong person' intent detected → GENERATE (Resetting Identity)")
+            print("[Router] 'Wrong person' intent detected -> GENERATE (Resetting Identity)")
             return {
                 "next_step": "generate",
                 "generation_params": {"target_region": None, "use_controlnet": False},
             }
 
-        # 3. Age intent
+        # 3. Age intent (explicit or edit mis-tagged with age_params + aging language)
+        age_params = state.get("age_params") or {}
+        years_raw = age_params.get("years")
+        try:
+            years_val = int(years_raw) if years_raw is not None else None
+        except (TypeError, ValueError):
+            years_val = None
+
+        aging_language = any(
+            k in msg_text
+            for k in (
+                " year",
+                " years",
+                "older",
+                "younger",
+                "aging",
+                "decade",
+                " in 10",
+                " in 20",
+                " in 5",
+                "mid-life",
+                "senior",
+                "teenage",
+                "youthful",
+                "looked like in",
+                "would look",
+            )
+        )
+
         if user_intent == "age":
-            print("[Router] Age intent detected → AGE")
+            print("[Router] Age intent detected -> AGE")
+            return {
+                "next_step": "age",
+                "generation_params": {"target_region": None, "use_controlnet": True},
+            }
+        if (
+            years_val is not None
+            and years_val != 0
+            and user_intent == "edit"
+            and aging_language
+        ):
+            print("[Router] Age params + aging language on edit intent -> AGE")
             return {
                 "next_step": "age",
                 "generation_params": {"target_region": None, "use_controlnet": True},
@@ -326,13 +443,13 @@ class RouterNode:
                     break
 
         if target_region:
-            print(f"[Router] Precision region detected → INPAINT  (region={target_region})")
+            print(f"[Router] Precision region detected -> INPAINT  (region={target_region})")
             return {
                 "next_step": "inpaint",
                 "generation_params": {"target_region": target_region, "use_controlnet": False},
             }
 
-        print("[Router] Structural/texture change → EDIT (ControlNet)")
+        print("[Router] Structural/texture change -> EDIT (ControlNet)")
         return {
             "next_step": "edit",
             "generation_params": {"target_region": None, "use_controlnet": True},
@@ -343,8 +460,9 @@ class RouterNode:
 # 3. VerificationNode — scores the output and decides to accept or retry
 # ---------------------------------------------------------------------------
 
-QUALITY_THRESHOLD = 55.0   # combined_score (0-100) below which we retry
-MAX_RETRIES = 3
+QUALITY_THRESHOLD = 50.0   # combined_score (0-100) below which we retry
+# ml_attempt_count is incremented each artist run; allow at most one verify→retry cycle.
+MAX_RETRIES = 2
 
 
 class VerificationNode:
@@ -360,9 +478,9 @@ class VerificationNode:
             "SMARTSKETCH_ENABLE_FORENSIC_CRITIC", "True"
         ).lower() == "true"
         try:
-            self.critic_max_retries = int(os.environ.get("SMARTSKETCH_CRITIC_MAX_RETRIES", "2"))
+            self.critic_max_retries = int(os.environ.get("SMARTSKETCH_CRITIC_MAX_RETRIES", "1"))
         except ValueError:
-            self.critic_max_retries = 2
+            self.critic_max_retries = 1
 
     def __call__(self, state: ForensicAgentState) -> Dict[str, Any]:
         print("\n--- VERIFYING GENERATION QUALITY ---")
@@ -372,8 +490,13 @@ class VerificationNode:
         history = list(state.get("verification_history") or [])
 
         if current_data is None:
-            print("[Verifier] No image in state -> accepting result")
-            return {"next_step": "end", "is_verified": True, "last_score": None}
+            print("[Verifier] ERROR: No image in state (artist call likely failed)")
+            return {
+                "next_step": "end", 
+                "is_verified": False, 
+                "last_score": 0.0,
+                "last_error": "ML Artist failed to produce an image."
+            }
 
         try:
             if isinstance(current_data, PilImage.Image):
@@ -390,7 +513,10 @@ class VerificationNode:
             return {"next_step": "end", "is_verified": True, "last_score": None}
 
         profile = state.get("suspect_profile")
-        prompt = profile.to_detailed_prompt() if profile else "forensic face"
+        if profile:
+            prompt = state.get("enhanced_prompt") or profile.to_detailed_prompt()
+        else:
+            prompt = state.get("enhanced_prompt") or "forensic face"
         generation_params = state.get("generation_params") or {}
         identity_score = generation_params.get("last_identity_score")
 
@@ -408,6 +534,16 @@ class VerificationNode:
             except Exception as exc:
                 print(f"[Verifier] Scoring failed: {exc}")
 
+        modal_scores = generation_params.get("modal_scores") or {}
+        if combined is None and modal_scores.get("combined_score") is not None:
+            try:
+                combined = float(modal_scores["combined_score"])
+            except (TypeError, ValueError):
+                combined = None
+            if scores is None:
+                scores = dict(modal_scores)
+            print(f"[Verifier] Using Modal pipeline combined_score={combined}")
+
         if self.enable_critic and self.critic_client and self.critic_client.is_configured():
             critic_report = self.critic_client.analyze(
                 image=current_image,
@@ -418,6 +554,7 @@ class VerificationNode:
                 metadata={
                     "generation_id": state.get("generation_id"),
                     "iteration": iteration,
+                    "ml_attempt_count": state.get("ml_attempt_count"),
                     "generation_params": generation_params,
                 },
             )
@@ -444,7 +581,8 @@ class VerificationNode:
         critic_attempts = int(state.get("critic_attempts") or 0)
         adjustment = str(critic_report.get("prompt_adjustment") or "").strip()
         wants_revision = critic_report.get("decision") == "revise" and bool(adjustment)
-        can_retry_critic = critic_attempts < self.critic_max_retries and iteration < MAX_RETRIES
+        ml_attempts = int(state.get("ml_attempt_count") or 0)
+        can_retry_critic = critic_attempts < self.critic_max_retries and ml_attempts < MAX_RETRIES
 
         if wants_revision and can_retry_critic:
             print(f"[Verifier/Critic] Revision requested. Retrying [{critic_attempts + 1}/{self.critic_max_retries}]")
@@ -455,18 +593,16 @@ class VerificationNode:
                 "critic_report": critic_report,
                 "critic_adjustment_prompt": adjustment,
                 "critic_attempts": critic_attempts + 1,
-                "iteration_count": iteration + 1,
                 "verification_history": history,
             }
 
-        if combined is not None and combined < QUALITY_THRESHOLD and iteration < MAX_RETRIES:
-            print(f"[Verifier] Low quality (score={combined:.1f}). Retrying [{iteration}/{MAX_RETRIES}]")
+        if combined is not None and combined < QUALITY_THRESHOLD and ml_attempts < MAX_RETRIES:
+            print(f"[Verifier] Low quality (score={combined:.1f}). Retrying (ml_attempts={ml_attempts}/{MAX_RETRIES})")
             return {
                 "next_step": "retry",
                 "is_verified": False,
                 "last_score": combined,
                 "critic_report": critic_report,
-                "iteration_count": iteration + 1,
                 "verification_history": history,
             }
 

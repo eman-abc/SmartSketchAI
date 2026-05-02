@@ -1,10 +1,9 @@
-import { useEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { fetchUserImages } from '../lib/api';
 import type { GenerateResult } from '../types';
 
 type SidebarProps = {
+  artifacts?: GenerateResult[];
   onSelectImage?: (image: GenerateResult) => void;
 };
 
@@ -42,20 +41,9 @@ function navLinkClasses(active: boolean) {
   ].join(' ');
 }
 
-function Sidebar({ onSelectImage }: SidebarProps) {
+function Sidebar({ artifacts = [], onSelectImage }: SidebarProps) {
   const location = useLocation();
   const { isAuthenticated, logout } = useAuth();
-  const [history, setHistory] = useState<GenerateResult[]>([]);
-  const [loading, setLoading] = useState(false);
-
-  useEffect(() => {
-    if (!isAuthenticated) return;
-    setLoading(true);
-    fetchUserImages()
-      .then((data: GenerateResult[]) => setHistory(Array.isArray(data) ? data : []))
-      .catch(() => { })
-      .finally(() => setLoading(false));
-  }, [isAuthenticated]);
 
   return (
     <aside className="flex h-full w-[17.5rem] shrink-0 flex-col gap-6 overflow-hidden rounded-3xl border border-studio bg-panel/95 px-6 pt-12 pb-6 shadow-panel backdrop-blur-sm animate-fade-in">
@@ -64,22 +52,47 @@ function Sidebar({ onSelectImage }: SidebarProps) {
           <h2 className="text-[11px] font-semibold uppercase tracking-[0.2em] text-muted">Session artifacts</h2>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto pr-1">
-          {loading ? (
-            <p className="text-xs text-muted animate-pulse">Loading history…</p>
-          ) : history.length > 0 ? (
-            <ul className="space-y-1.5">
-              {history.map((item) => (
-                <li key={item.id}>
-                  <button
-                    type="button"
-                    onClick={() => onSelectImage?.(item)}
-                    className="w-full rounded-xl border border-transparent px-3 py-2 text-left text-xs leading-snug text-muted transition duration-200 hover:border-studio hover:bg-panel hover:text-text-high"
-                    title={item.prompt}
+          {artifacts.length > 0 ? (
+            <ul className="space-y-3">
+              {artifacts.map((item, index) => {
+                const style = (item.metadata?.style as string) || (item.metadata?.output_type as string) || 'Photo';
+                const isSketch = style.toLowerCase().includes('pencil') || style.toLowerCase().includes('charcoal') || style.toLowerCase().includes('sketch');
+                
+                return (
+                  <li 
+                    key={item.id} 
+                    className="animate-fade-in-up" 
+                    style={{ animationDelay: `${index * 50}ms` }}
                   >
-                    {item.prompt ?? 'Untitled sketch'}
-                  </button>
-                </li>
-              ))}
+                    <button
+                      type="button"
+                      onClick={() => onSelectImage?.(item)}
+                      className="group relative flex w-full flex-col gap-1.5 rounded-2xl border border-white/5 bg-white/[0.02] px-4 py-3 text-left transition-all duration-300 hover:border-brand/40 hover:bg-brand/[0.04] hover:shadow-soft-glow"
+                    >
+                      {/* Info Content */}
+                      <p className="truncate text-[11px] font-medium leading-none text-text-high/90 transition-colors group-hover:text-brand">
+                        {item.prompt || 'Untitled composite'}
+                      </p>
+                      
+                      <div className="flex items-center gap-2">
+                        <span className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider ${
+                          isSketch 
+                            ? 'bg-amber-500/10 text-amber-400 ring-1 ring-inset ring-amber-500/20' 
+                            : 'bg-brand/10 text-brand ring-1 ring-inset ring-brand/20'
+                        }`}>
+                          {style}
+                        </span>
+                        <span className="text-[9px] text-muted/60">
+                          ID: {item.generation_id?.slice(-4) || '----'}
+                        </span>
+                      </div>
+
+                      {/* Selection Glow Indicator */}
+                      <div className="absolute -left-1 top-1/4 h-1/2 w-0.5 rounded-full bg-brand opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
+                    </button>
+                  </li>
+                );
+              })}
             </ul>
           ) : (
             <p className="text-xs text-muted">No generations yet.</p>

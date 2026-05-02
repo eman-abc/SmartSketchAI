@@ -144,13 +144,15 @@ class TestForensicFeatures(unittest.TestCase):
             args, kwargs = mock_post.call_args
             payload = kwargs['json']
 
-            self.assertEqual(payload['prompt'], "enhanced forensic description")
+            self.assertIn("enhanced forensic description", payload["prompt"])
+            self.assertIn("male", payload["prompt"].lower())
+            self.assertIn("forensic photograph", payload["prompt"].lower())
             self.assertEqual(payload['negative_prompt'], "no glasses, no hat")
-            print("[PASS] Artist node correctly transmitted enhanced prompts to remote service.")
+            print("[PASS] Artist node correctly transmitted merged generation prompt to remote service.")
 
     def test_face_restoration_logic(self):
         """Verify that the FaceRestorer correctly processes images."""
-        with patch('ml_engine.restorer.GFPGANer') as mock_gfpgan_class:
+        with patch("gfpgan.GFPGANer") as mock_gfpgan_class:
             from PIL import Image
             import numpy as np
 

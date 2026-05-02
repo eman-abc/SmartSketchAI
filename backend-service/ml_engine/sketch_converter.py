@@ -139,6 +139,7 @@ class MemoryEfficientSketchConverter:
             controlnet_conditioning_scale=detail_level,
             guidance_scale=7.5,
             generator=generator,
+            num_images_per_prompt=1,
         ).images[0]
         
         print("✅ Sketch generated!")

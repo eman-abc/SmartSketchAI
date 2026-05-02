@@ -83,6 +83,14 @@ export interface ForensicStreamStatusData {
   percent?: number;
 }
 
+/** GPU pipeline scores from Modal (CLIP / combined / identity) when Django has no local scorer */
+export type AgentMlScores = {
+  clip_score?: number;
+  combined_score?: number;
+  identity_score?: number;
+  interpretation?: string;
+};
+
 export interface AgentChatResult {
   status: string;
   thread_id: string;
@@ -93,6 +101,8 @@ export interface AgentChatResult {
   generation_id?: string | null;
   identity_score?: number | null;
   last_score?: number | null;
+  /** Modal pipeline score breakdown for the right-panel gauges */
+  ml_scores?: AgentMlScores;
   is_verified?: boolean;
   next_step?: string | null;
   iteration?: number | null;

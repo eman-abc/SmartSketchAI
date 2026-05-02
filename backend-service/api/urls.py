@@ -3,7 +3,8 @@ from django.urls import path
 from .views import (
     RegisterView, ProfileView, MyGeneratedImagesView, AuditLogListView,
     ForensicRequestCreateView, ForensicApproveView,
-    generate_forensic_sketch, edit_forensic_sketch, age_forensic_sketch, agent_chat, agent_chat_stream,
+    generate_forensic_sketch, edit_forensic_sketch, age_forensic_sketch, agent_chat,
+    agent_chat_stream,
     sketch_style_view, export_report_view, health_check,
 )
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView

@@ -94,5 +94,8 @@ class ForensicAgentState(TypedDict):
     # Error tracking
     last_error: Optional[str]
 
-    # Loop counter (prevent infinite retry loops)
+    # Conversation turn counter (incremented once per user message in Analyzer)
     iteration_count: int
+
+    # ML inference attempts this turn (reset in Analyzer; incremented each Artist run)
+    ml_attempt_count: int

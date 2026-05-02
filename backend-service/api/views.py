@@ -2,12 +2,12 @@
 # api/views.py
 import base64
 import io
-import os
 import json
+import os
 import requests
 from django.core.files.base import ContentFile
+from django.http import StreamingHttpResponse
 from django.utils import timezone
-from django.http import HttpResponse, StreamingHttpResponse
 from rest_framework import generics, permissions, status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
@@ -23,7 +23,7 @@ from .serializers import (
 from .ml_service import MLService
 from django.conf import settings
 
-REMOTE_ML_URL = settings.ML_CONFIG.get('REMOTE_ML_URL') or settings.COLAB_ML_URL
+COLAB_ML_URL = settings.COLAB_ML_URL
 
 def pil_to_content_file(image, filename):
     buffer = io.BytesIO()
@@ -41,10 +41,10 @@ def normalize_ml_base_url(url):
 
 def call_remote_critic(image_b64, prompt, suspect_profile=None, route_used="generate", scores=None, metadata=None):
     ml_config = getattr(settings, 'ML_CONFIG', {})
-    if not ml_config.get('ENABLE_FORENSIC_CRITIC', True) or not REMOTE_ML_URL:
+    if not ml_config.get('ENABLE_FORENSIC_CRITIC', True) or not COLAB_ML_URL:
         return None
 
-    base = normalize_ml_base_url(REMOTE_ML_URL)
+    base = normalize_ml_base_url(COLAB_ML_URL)
     try:
         resp = requests.post(
             f"{base}/critic",
@@ -176,27 +176,17 @@ def generate_forensic_sketch(request):
         age = 30  # Default age
 
     # ================================================================
-    # 1. Try remote Modal ML Service first (Primary)
+    # 1. Try Colab ML Service First (Primary)
     # ================================================================
-    if REMOTE_ML_URL:
+    if COLAB_ML_URL:
         # Strip any path suffix (e.g. /generate) so we always get the bare base URL,
         # then append the correct route.  Works regardless of what the user pasted in .env.
-        _base = normalize_ml_base_url(REMOTE_ML_URL)
+        _base = normalize_ml_base_url(COLAB_ML_URL)
         ml_url = f"{_base}/generate"
         try:
-            sketch_style = request.data.get("sketch_style", "pencil")
-            seed = request.data.get("seed")
-
             ml_resp = requests.post(
                 ml_url,
-                json={
-                    "prompt": prompt, 
-                    "case_type": case_type, 
-                    "age": age,
-                    "output_type": output_type,
-                    "sketch_style": sketch_style,
-                    "seed": seed
-                },
+                json={"prompt": prompt, "case_type": case_type, "age": age},
                 headers={
                     "ngrok-skip-browser-warning": "1",
                     "User-Agent": "SmartSketch-Django/1.0",
@@ -219,7 +209,7 @@ def generate_forensic_sketch(request):
                             image_file=image_file,
                             generation_id=generation_id,
                             seed=ml_data.get("metadata", {}).get("seed"),
-                            model_version=ml_data.get("metadata", {}).get("model_version", "modal-v1"),
+                            model_version=ml_data.get("metadata", {}).get("model_version", "colab-v1"),
                             forensic_hash=ml_data.get("forensic_hash"),
                             is_watermarked=ml_data.get("is_watermarked", False),
                         )
@@ -259,13 +249,13 @@ def generate_forensic_sketch(request):
                                 "forensic_hash": ml_data.get("forensic_hash"),
                                 "is_watermarked": ml_data.get("is_watermarked", False),
                                 "critic_report": critic_report,
-                                "provider": "modal"
+                                "provider": "colab"
                             },
                             status=status.HTTP_200_OK,
                         )
-            print(f"⚠️ Remote ML service returned status {ml_resp.status_code}")
-        except Exception as remote_e:
-            print(f"⚠️ Remote ML service failed: {remote_e}")
+            print(f"⚠️ Colab ML service returned status {ml_resp.status_code}")
+        except Exception as colab_e:
+            print(f"⚠️ Colab ML service failed: {colab_e}")
 
     # ================================================================
     # 2. Try Local ML Engine as Fallback (if enabled)
@@ -333,7 +323,7 @@ def generate_forensic_sketch(request):
             print(f"⚠️ Local ML Engine failed: {local_e}")
 
     return Response(
-        {"error": "ML generation failed. Remote ML service unavailable and local ML disabled/failed."},
+        {"error": "ML generation failed. Colab service unavailable and local ML disabled/failed."},
         status=status.HTTP_503_SERVICE_UNAVAILABLE
     )
 
@@ -364,10 +354,10 @@ def edit_forensic_sketch(request):
         return Response({"error": "Original image not found"}, status=status.HTTP_404_NOT_FOUND)
 
     # ================================================================
-    # 1. Try remote Modal ML Service first (Primary)
+    # 1. Try Colab ML Service First (Primary)
     # ================================================================
-    if REMOTE_ML_URL:
-        _base = normalize_ml_base_url(REMOTE_ML_URL)
+    if COLAB_ML_URL:
+        _base = normalize_ml_base_url(COLAB_ML_URL)
         ml_url = f"{_base}/edit"
         try:
             with generated_image.image_file.open('rb') as f:
@@ -379,9 +369,7 @@ def edit_forensic_sketch(request):
                     "generation_id": f"gen_{generated_image.id}",
                     "original_image": original_image_b64,
                     "edit_prompt": edit_prompt,
-                    "negative_prompt": request.data.get("negative_prompt"),
                     "strength": strength,
-                    "seed": request.data.get("seed")
                 },
                 headers={
                     "ngrok-skip-browser-warning": "1",
@@ -446,12 +434,12 @@ def edit_forensic_sketch(request):
                                 "is_watermarked": ml_data.get("is_watermarked", False),
                                 "critic_report": critic_report,
                                 "edit_id": edit_id,
-                                "provider": "modal"
+                                "provider": "colab"
                             },
                             status=status.HTTP_200_OK,
                         )
-        except Exception as remote_e:
-            print(f"⚠️ Modal ML edit failed: {remote_e}")
+        except Exception as colab_e:
+            print(f"⚠️ Colab ML edit failed: {colab_e}")
 
     # ================================================================
     # 2. Try Local ML Engine as Fallback (if enabled)
@@ -525,7 +513,7 @@ def edit_forensic_sketch(request):
             print(f"⚠️ Local ML edit failed: {local_e}")
 
     return Response(
-        {"error": "ML edit failed. Remote ML service unavailable and local ML disabled/failed."},
+        {"error": "ML edit failed. Colab service unavailable and local ML disabled/failed."},
         status=status.HTTP_503_SERVICE_UNAVAILABLE
     )
 
@@ -549,9 +537,9 @@ def age_forensic_sketch(request):
     except GeneratedImage.DoesNotExist:
         return Response({"error": "Original image not found"}, status=status.HTTP_404_NOT_FOUND)
 
-    # 1. Try remote Modal ML Service first
-    if REMOTE_ML_URL:
-        _base = normalize_ml_base_url(REMOTE_ML_URL)
+    # 1. Try Colab/Modal
+    if COLAB_ML_URL:
+        _base = normalize_ml_base_url(COLAB_ML_URL)
         ml_url = f"{_base}/age"
         try:
             with generated_image.image_file.open('rb') as f:
@@ -563,8 +551,6 @@ def age_forensic_sketch(request):
                     "generation_id": f"gen_{generated_image.id}",
                     "original_image": original_image_b64,
                     "years": years,
-                    "prompt": request.data.get("prompt") or request.data.get("enhanced_prompt"),
-                    "seed": request.data.get("seed")
                 },
                 headers={
                     "ngrok-skip-browser-warning": "1",
@@ -620,10 +606,10 @@ def age_forensic_sketch(request):
                             "is_watermarked": ml_data.get("is_watermarked", False),
                             "critic_report": critic_report,
                             "edit_id": edit_id,
-                            "provider": "modal"
+                            "provider": "colab"
                         }, status=status.HTTP_200_OK)
-        except Exception as remote_e:
-            print(f"⚠️ Modal ML age failed: {remote_e}")
+        except Exception as colab_e:
+            print(f"⚠️ Colab ML age failed: {colab_e}")
 
     # 2. Try Local Fallback
     ml_config = getattr(settings, 'ML_CONFIG', {})
@@ -671,9 +657,179 @@ def age_forensic_sketch(request):
             print(f"⚠️ Local ML age failed: {local_e}")
 
     return Response(
-        {"error": "ML age failed. Remote ML service unavailable and local ML disabled/failed."},
+        {"error": "ML age failed. Colab service unavailable and local ML disabled/failed."},
         status=status.HTTP_503_SERVICE_UNAVAILABLE
     )
+
+def _forensic_agent_chat_payload(user, message, thread_id, case_number, request):
+    """
+    Run the LangGraph forensic agent, persist any image, return the same dict
+    the JSON /forensic/chat/ endpoint returns (without the Response wrapper).
+    """
+    from PIL import Image as PilImage
+    import uuid as _uuid
+
+    if thread_id:
+        conversation, _ = Conversation.objects.get_or_create(
+            thread_id=thread_id,
+            user=user,
+            defaults={"case_number": case_number},
+        )
+    else:
+        thread_id = "thread_" + _uuid.uuid4().hex[:8]
+        conversation = Conversation.objects.create(
+            thread_id=thread_id,
+            user=user,
+            case_number=case_number or ("CASE-" + _uuid.uuid4().hex[:4].upper()),
+        )
+
+    agent = MLService.get_agent()
+    final_state = agent.run(message, thread_id=thread_id)
+
+    profile = final_state.get("suspect_profile")
+    image_data = final_state.get("current_image")
+    gen_id = final_state.get("generation_id") or ("agent_" + thread_id)
+    gen_params = final_state.get("generation_params") or {}
+    critic_report = final_state.get("critic_report")
+    modal_scores = gen_params.get("modal_scores") or {}
+
+    last_score_out = final_state.get("last_score")
+    if last_score_out is None and modal_scores.get("combined_score") is not None:
+        try:
+            last_score_out = float(modal_scores["combined_score"])
+        except (TypeError, ValueError):
+            pass
+    identity_out = gen_params.get("last_identity_score")
+    if identity_out is None and modal_scores.get("identity_score") is not None:
+        try:
+            identity_out = float(modal_scores["identity_score"])
+        except (TypeError, ValueError):
+            pass
+
+    image_url = None
+    saved_image_id = None
+
+    if image_data is not None:
+        try:
+            if isinstance(image_data, str):
+                pil_img = PilImage.open(
+                    io.BytesIO(base64.b64decode(image_data))
+                ).convert("RGB")
+            elif isinstance(image_data, PilImage.Image):
+                pil_img = image_data
+            else:
+                pil_img = None
+
+            if pil_img is not None:
+                image_file = pil_to_content_file(pil_img, gen_id + ".png")
+                generated = GeneratedImage.objects.create(
+                    user=user,
+                    prompt=profile.to_detailed_prompt() if profile else message,
+                    image_file=image_file,
+                    model_version="agent-sdxl-v1",
+                    generation_id=gen_id,
+                )
+                save_critique(critic_report, generated=generated)
+                ImageScore.objects.create(
+                    image=generated,
+                    identity_score=identity_out,
+                    final_score=last_score_out,
+                )
+                AuditLog.objects.create(
+                    user=user,
+                    action="generate",
+                    ip_address=request.META.get("REMOTE_ADDR"),
+                    prompt_used=message,
+                    image=generated,
+                )
+                image_url = request.build_absolute_uri(generated.image_file.url)
+                saved_image_id = generated.id
+                print("[AgentChat] Image saved id=" + str(saved_image_id))
+        except Exception as save_err:
+            print("[AgentChat] Image save failed: " + str(save_err))
+
+    return {
+        "status": "success",
+        "thread_id": thread_id,
+        "case_number": conversation.case_number,
+        "suspect_profile": profile.model_dump() if profile else {},
+        "image_url": image_url,
+        "image_id": saved_image_id,
+        "generation_id": gen_id,
+        "identity_score": identity_out,
+        "last_score": last_score_out,
+        "ml_scores": modal_scores,
+        "is_verified": final_state.get("is_verified", False),
+        "next_step": final_state.get("next_step"),
+        "iteration": final_state.get("iteration_count"),
+        "last_error": final_state.get("last_error"),
+        "critic_report": critic_report,
+        "verification_history": final_state.get("verification_history") or [],
+    }
+
+
+def _sse_chunk(event: str, data: dict) -> bytes:
+    return f"event: {event}\ndata: {json.dumps(data)}\n\n".encode("utf-8")
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def agent_chat_stream(request):
+    """
+    Same body as /forensic/chat/ but streams Server-Sent Events for the Forensic Console UI.
+    """
+    user = request.user
+    message = request.data.get("message")
+    thread_id = request.data.get("thread_id")
+    case_number = request.data.get("case_number")
+
+    if not message:
+        return Response(
+            {"error": "message is required"}, status=status.HTTP_400_BAD_REQUEST
+        )
+
+    def event_stream():
+        try:
+            yield _sse_chunk(
+                "status",
+                {"stage": "analyze", "message": "[Analyzer] Analyzing suspect description..."},
+            )
+            yield _sse_chunk(
+                "status",
+                {"stage": "modal", "message": "[Modal] Contacting remote ML service..."},
+            )
+            yield _sse_chunk(
+                "progress",
+                {
+                    "stage": "artist",
+                    "message": "[Artist] Running forensic sketch agent (may take a minute)...",
+                    "percent": 40,
+                },
+            )
+            payload = _forensic_agent_chat_payload(
+                user, message, thread_id, case_number, request
+            )
+            yield _sse_chunk(
+                "status",
+                {
+                    "stage": "verify",
+                    "message": "[Verify] Quality check complete.",
+                    "percent": 92,
+                },
+            )
+            yield _sse_chunk("result", payload)
+        except Exception as e:
+            print("[Agent Stream Error] " + str(e))
+            import traceback
+
+            traceback.print_exc()
+            yield _sse_chunk("error", {"error": str(e)})
+
+    resp = StreamingHttpResponse(event_stream(), content_type="text/event-stream")
+    resp["Cache-Control"] = "no-cache"
+    resp["X-Accel-Buffering"] = "no"
+    return resp
+
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
@@ -689,126 +845,6 @@ def agent_chat(request):
           "image_url", "image_id", "generation_id", "identity_score",
           "last_score", "is_verified", "next_step", "iteration", "last_error" }
     """
-    from PIL import Image as PilImage
-    import uuid as _uuid
-
-    user        = request.user
-    message     = request.data.get("message")
-    thread_id   = request.data.get("thread_id")
-    case_number = request.data.get("case_number")
-
-    if not message:
-        return Response({"error": "message is required"}, status=status.HTTP_400_BAD_REQUEST)
-
-    if thread_id:
-        conversation, _ = Conversation.objects.get_or_create(
-            thread_id=thread_id, user=user,
-            defaults={"case_number": case_number},
-        )
-    else:
-        thread_id    = "thread_" + _uuid.uuid4().hex[:8]
-        conversation = Conversation.objects.create(
-            thread_id=thread_id,
-            user=user,
-            case_number=case_number or ("CASE-" + _uuid.uuid4().hex[:4].upper()),
-        )
-
-    try:
-        agent       = MLService.get_agent()
-        final_state = agent.run(message, thread_id=thread_id)
-
-        profile    = final_state.get("suspect_profile")
-        image_data = final_state.get("current_image")   # base64 str or PIL Image
-        gen_id     = final_state.get("generation_id") or ("agent_" + thread_id)
-        gen_params = final_state.get("generation_params") or {}
-        critic_report = final_state.get("critic_report")
-
-        image_url      = None
-        saved_image_id = None
-
-        if image_data is not None:
-            try:
-                # current_image is now stored as a base64 string in the agent state
-                if isinstance(image_data, str):
-                    import base64 as _b64
-                    pil_img = PilImage.open(
-                        io.BytesIO(_b64.b64decode(image_data))
-                    ).convert("RGB")
-                elif isinstance(image_data, PilImage.Image):
-                    pil_img = image_data
-                else:
-                    pil_img = None
-
-                if pil_img is not None:
-                    image_file = pil_to_content_file(pil_img, gen_id + ".png")
-                    generated  = GeneratedImage.objects.create(
-                        user=user,
-                        prompt=profile.to_detailed_prompt() if profile else message,
-                        image_file=image_file,
-                        model_version="agent-sdxl-v1",
-                        generation_id=gen_id,
-                    )
-                    save_critique(critic_report, generated=generated)
-                    ImageScore.objects.create(
-                        image=generated,
-                        identity_score=gen_params.get("last_identity_score"),
-                        final_score=final_state.get("last_score"),
-                    )
-                    AuditLog.objects.create(
-                        user=user,
-                        action="generate",
-                        ip_address=request.META.get("REMOTE_ADDR"),
-                        prompt_used=message,
-                        image=generated,
-                    )
-                    image_url      = request.build_absolute_uri(generated.image_file.url)
-                    saved_image_id = generated.id
-                    print("[AgentChat] Image saved id=" + str(saved_image_id))
-            except Exception as save_err:
-                print("[AgentChat] Image save failed: " + str(save_err))
-
-        return Response({
-            "status":          "success",
-            "thread_id":       thread_id,
-            "case_number":     conversation.case_number,
-            "suspect_profile": profile.model_dump() if profile else {},
-            "image_url":       image_url,
-            "image_id":        saved_image_id,
-            "generation_id":   gen_id,
-            "identity_score":  gen_params.get("last_identity_score"),
-            "last_score":      final_state.get("last_score"),
-            "is_verified":     final_state.get("is_verified", False),
-            "next_step":       final_state.get("next_step"),
-            "iteration":       final_state.get("iteration_count"),
-            "last_error":      final_state.get("last_error"),
-            "critic_report":   critic_report,
-            "verification_history": final_state.get("verification_history") or [],
-        }, status=status.HTTP_200_OK)
-
-    except Exception as e:
-        print("[Agent Error] " + str(e))
-        import traceback
-        traceback.print_exc()
-        return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-
-def _sse_format(payload, event=None):
-    lines = []
-    if event:
-        lines.append(f"event: {event}")
-    lines.append(f"data: {json.dumps(payload)}")
-    return "\n".join(lines) + "\n\n"
-
-
-@api_view(['POST'])
-@permission_classes([IsAuthenticated])
-def agent_chat_stream(request):
-    """
-    Streaming variant of agent_chat that emits SSE status updates + final result.
-    """
-    from PIL import Image as PilImage
-    import uuid as _uuid
-
     user = request.user
     message = request.data.get("message")
     thread_id = request.data.get("thread_id")
@@ -817,117 +853,17 @@ def agent_chat_stream(request):
     if not message:
         return Response({"error": "message is required"}, status=status.HTTP_400_BAD_REQUEST)
 
-    if thread_id:
-        conversation, _ = Conversation.objects.get_or_create(
-            thread_id=thread_id, user=user,
-            defaults={"case_number": case_number},
+    try:
+        payload = _forensic_agent_chat_payload(
+            user, message, thread_id, case_number, request
         )
-    else:
-        thread_id = "thread_" + _uuid.uuid4().hex[:8]
-        conversation = Conversation.objects.create(
-            thread_id=thread_id,
-            user=user,
-            case_number=case_number or ("CASE-" + _uuid.uuid4().hex[:4].upper()),
-        )
+        return Response(payload, status=status.HTTP_200_OK)
+    except Exception as e:
+        print("[Agent Error] " + str(e))
+        import traceback
 
-    def event_stream():
-        try:
-            yield _sse_format(
-                {"stage": "analyzer", "message": "[Analyzer] Extracting eye color...", "percent": 15},
-                event="status"
-            )
-
-            agent = MLService.get_agent()
-
-            yield _sse_format(
-                {"stage": "modal", "message": "[Modal] Warming SDXL Engine...", "percent": 35},
-                event="status"
-            )
-            yield _sse_format(
-                {"stage": "artist", "message": "[Artist] Denoising: 45%...", "percent": 45},
-                event="progress"
-            )
-
-            final_state = agent.run(message, thread_id=thread_id)
-
-            profile = final_state.get("suspect_profile")
-            image_data = final_state.get("current_image")
-            gen_id = final_state.get("generation_id") or ("agent_" + thread_id)
-            gen_params = final_state.get("generation_params") or {}
-            critic_report = final_state.get("critic_report")
-
-            image_url = None
-            saved_image_id = None
-
-            if image_data is not None:
-                try:
-                    if isinstance(image_data, str):
-                        pil_img = PilImage.open(
-                            io.BytesIO(base64.b64decode(image_data))
-                        ).convert("RGB")
-                    elif isinstance(image_data, PilImage.Image):
-                        pil_img = image_data
-                    else:
-                        pil_img = None
-
-                    if pil_img is not None:
-                        image_file = pil_to_content_file(pil_img, gen_id + ".png")
-                        generated = GeneratedImage.objects.create(
-                            user=user,
-                            prompt=profile.to_detailed_prompt() if profile else message,
-                            image_file=image_file,
-                            model_version="agent-sdxl-v1",
-                            generation_id=gen_id,
-                        )
-                        save_critique(critic_report, generated=generated)
-                        ImageScore.objects.create(
-                            image=generated,
-                            identity_score=gen_params.get("last_identity_score"),
-                            final_score=final_state.get("last_score"),
-                        )
-                        AuditLog.objects.create(
-                            user=user,
-                            action="generate",
-                            ip_address=request.META.get("REMOTE_ADDR"),
-                            prompt_used=message,
-                            image=generated,
-                        )
-                        image_url = request.build_absolute_uri(generated.image_file.url)
-                        saved_image_id = generated.id
-                except Exception as save_err:
-                    print("[AgentChatStream] Image save failed: " + str(save_err))
-
-            result_payload = {
-                "status": "success",
-                "thread_id": thread_id,
-                "case_number": conversation.case_number,
-                "suspect_profile": profile.model_dump() if profile else {},
-                "image_url": image_url,
-                "image_id": saved_image_id,
-                "generation_id": gen_id,
-                "identity_score": gen_params.get("last_identity_score"),
-                "last_score": final_state.get("last_score"),
-                "is_verified": final_state.get("is_verified", False),
-                "next_step": final_state.get("next_step"),
-                "iteration": final_state.get("iteration_count"),
-                "last_error": final_state.get("last_error"),
-                "critic_report": critic_report,
-                "verification_history": final_state.get("verification_history") or [],
-            }
-
-            yield _sse_format(
-                {"stage": "artist", "message": "[Artist] Rendering complete.", "percent": 100},
-                event="status"
-            )
-            yield _sse_format(result_payload, event="result")
-        except Exception as e:
-            print("[Agent Stream Error] " + str(e))
-            yield _sse_format({"error": str(e)}, event="error")
-
-    response = StreamingHttpResponse(event_stream(), content_type="text/event-stream")
-    response["Cache-Control"] = "no-cache"
-    response["X-Accel-Buffering"] = "no"
-    return response
+        traceback.print_exc()
+        return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 # ---------------------------------------------------------------------------

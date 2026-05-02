@@ -119,6 +119,11 @@ class MLService:
         # or the local heuristic when no explicit LLM is configured.
         llm = None
 
+        # Ensure we pass the remote URL from settings
+        remote_url = getattr(settings, "COLAB_ML_URL", "")
+        if not remote_url:
+             remote_url = ml_config.get("REMOTE_ML_URL", "")
+
         cls._agent = SmartSketchAgent(
             llm=llm,
             pipeline=local_pipeline,

@@ -222,8 +222,9 @@ export default function Workspace({
             forensic_hash: res.forensic_hash,
             critic_report: res.critic_report ?? null,
             scores: {
-              combined_score: res.last_score ?? undefined,
-              identity_score: res.identity_score ?? undefined,
+              clip_score: res.ml_scores?.clip_score,
+              combined_score: res.last_score ?? res.ml_scores?.combined_score,
+              identity_score: res.identity_score ?? res.ml_scores?.identity_score,
             },
             metadata:
               (res.suspect_profile as Record<string, unknown> | undefined) ?? {},

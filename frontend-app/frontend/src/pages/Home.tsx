@@ -10,6 +10,7 @@ import type { GenerateResult, ForensicLogEntry } from '../types';
 function Home() {
   const { isAuthenticated } = useAuth();
   const [generateResult, setGenerateResult] = useState<GenerateResult | null>(null);
+  const [sessionArtifacts, setSessionArtifacts] = useState<GenerateResult[]>([]);
   const [currentPrompt, setCurrentPrompt] = useState('');
   const [selectedImage, setSelectedImage] = useState<GenerateResult | null>(null);
   const [forensicLogs, setForensicLogs] = useState<ForensicLogEntry[]>([]);
@@ -21,6 +22,21 @@ function Home() {
       setGenerateResult(result);
       setCurrentPrompt(promptText);
       setSelectedImage(null);
+      if (result) {
+        setSessionArtifacts((prev) => {
+          const idx = prev.findIndex(
+            (x) =>
+              (result.generation_id && x.generation_id === result.generation_id) ||
+              x.id === result.id
+          );
+          if (idx >= 0) {
+            const next = [...prev];
+            next[idx] = result;
+            return next;
+          }
+          return [result, ...prev];
+        });
+      }
     },
     []
   );
@@ -33,6 +49,7 @@ function Home() {
 
   const handleNewSession = useCallback(() => {
     setGenerateResult(null);
+    setSessionArtifacts([]);
     setCurrentPrompt('');
     setSelectedImage(null);
     setForensicLogs([]);
@@ -47,7 +64,7 @@ function Home() {
     <div className="h-screen w-screen overflow-hidden bg-forensic-studio text-text-high antialiased">
       <TopBar onNewSession={handleNewSession} />
       <div className="mx-auto flex h-full min-h-0 flex-1 gap-6 overflow-hidden px-4 pb-6 pt-24 sm:px-6">
-        <Sidebar onSelectImage={handleSelectHistory} />
+        <Sidebar artifacts={sessionArtifacts} onSelectImage={handleSelectHistory} />
         <Workspace
           key={workspaceKey}
           onGenerateResult={handleGenerateResult}

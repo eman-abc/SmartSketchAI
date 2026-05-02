@@ -6,13 +6,19 @@ import io
 import base64
 import requests
 import traceback
+import re
 from typing import Dict, Any, List, Optional
 from PIL import Image as PilImage
 
 from langgraph.graph import StateGraph, END
 
 from .agent_state import ForensicAgentState, SuspectProfile
-from .agent_nodes import AnalyzerNode, RouterNode, VerificationNode
+from .agent_nodes import (
+    AnalyzerNode,
+    RouterNode,
+    VerificationNode,
+    build_initial_generation_prompt,
+)
 from .critic import ForensicCriticClient
 from .persistence import DjangoCheckpointer
 
@@ -85,36 +91,112 @@ class SmartSketchAgent:
         action = state.get("next_step", "generate")
         print(f"\n--- ML ARTIST: {action.upper()} ---")
 
+        ml_next = (state.get("ml_attempt_count") or 0) + 1
+
+        def _with_ml_attempt(d: Dict[str, Any]) -> Dict[str, Any]:
+            return {**d, "ml_attempt_count": ml_next}
+
         # ---- Remote Modal path (primary when remote_url is set) ----
         if self.remote_url:
-            result = self._call_remote(state, action)
-            if result is not None:
-                return result
-            print("[Artist] Remote call failed – falling back to local pipeline")
+            try:
+                result = self._call_remote(state, action)
+                if result is not None:
+                    return _with_ml_attempt(result)
+                print("[Artist] Remote call returned None – falling back")
+            except Exception as e:
+                print(f"[Artist] Remote call exception: {e}")
+                return _with_ml_attempt(
+                    {"current_image": None, "last_error": f"ML Service unreachable: {str(e)}"}
+                )
 
         # ---- Local pipeline path ----
         if self.pipeline is None:
-            print("[Artist] No local pipeline available; returning mock")
-            return {"current_image": None, "last_error": "No pipeline configured"}
+            err_msg = "No ML pipeline configured (Remote URL missing)" if not self.remote_url else "ML Service currently unavailable"
+            print(f"[Artist] {err_msg}")
+            return _with_ml_attempt({"current_image": None, "last_error": err_msg})
 
         try:
             if action == "generate":
-                return self._local_generate(state)
+                return _with_ml_attempt(self._local_generate(state))
             elif action == "edit":
-                return self._local_edit(state)
+                return _with_ml_attempt(self._local_edit(state))
             elif action == "age":
-                return self._local_age(state)
+                return _with_ml_attempt(self._local_age(state))
             elif action in ("inpaint", "retry"):
-                return self._local_inpaint(state)
+                return _with_ml_attempt(self._local_inpaint(state))
             else:
-                return {"last_error": f"Unknown action: {action}"}
+                return _with_ml_attempt({"last_error": f"Unknown action: {action}"})
         except Exception as e:
             traceback.print_exc()
-            return {"last_error": str(e)}
+            return _with_ml_attempt({"last_error": str(e)})
 
     # ------------------------------------------------------------------
     # Remote (Modal ML service) call
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _last_user_message_text(state: ForensicAgentState) -> str:
+        last_msg = state["messages"][-1]
+        if isinstance(last_msg, dict):
+            return (last_msg.get("content") or "").strip()
+        return (last_msg.content if hasattr(last_msg, "content") else str(last_msg)).strip()
+
+    def _call_remote_generate(
+        self, state: ForensicAgentState, gen_prompt: str, age: int
+    ) -> Optional[Dict[str, Any]]:
+        """POST /generate on Modal; returns state update or None."""
+        import base64, io as _io
+        from PIL import Image as _Image
+
+        try:
+            resp = requests.post(
+                f"{self.remote_url.rstrip('/').replace('/generate','').replace('/edit','')}/generate",
+                json={
+                    "prompt": gen_prompt,
+                    "negative_prompt": state.get("negative_prompt"),
+                    "case_type": "criminal",
+                    "age": age,
+                    "output_type": "photo",
+                },
+                timeout=180,
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                if data.get("success") and data.get("image_base64"):
+                    img_bytes = base64.b64decode(data["image_base64"])
+                    pil_img = _Image.open(_io.BytesIO(img_bytes)).convert("RGB")
+                    modal_scores = data.get("scores") or {}
+                    prev = state.get("generation_params") or {}
+                    ident = modal_scores.get("identity_score")
+                    if ident is None:
+                        ident = prev.get("last_identity_score")
+                    return {
+                        "current_image": pil_img,
+                        "generation_id": data.get("generation_id"),
+                        "critic_report": data.get("critic_report"),
+                        "generation_params": {
+                            **prev,
+                            "last_identity_score": ident,
+                            "last_ml_route": "generate",
+                            "modal_scores": modal_scores,
+                        },
+                    }
+                print(
+                    "[Artist/remote/generate] Modal JSON missing image: "
+                    f"success={data.get('success')} err={data.get('error')}"
+                )
+            else:
+                print(f"[Artist/remote/generate] HTTP {resp.status_code}: {resp.text[:500]}")
+        except requests.exceptions.Timeout:
+            print("[Artist/remote/generate] ERROR: Request timed out after 180s")
+        except Exception as e:
+            if hasattr(e, "response") and e.response is not None:
+                print(
+                    f"[Artist/remote/generate] ERROR {e.response.status_code}: {e.response.text}"
+                )
+            else:
+                print(f"[Artist/remote/generate] EXCEPTION: {e}")
+        return None
 
     def _call_remote(self, state: ForensicAgentState, action: str) -> Optional[Dict[str, Any]]:
         """
@@ -125,7 +207,6 @@ class SmartSketchAgent:
         from PIL import Image as _Image
 
         profile: SuspectProfile = state.get("suspect_profile") or SuspectProfile()
-        prompt = profile.to_detailed_prompt()
 
         if action == "age":
             try:
@@ -134,47 +215,58 @@ class SmartSketchAgent:
                 print(f"[Artist/remote/age] {e}")
                 return None
 
-        # ---- /generate ----
-        if action == "generate":
-            try:
-                resp = requests.post(
-                    f"{self.remote_url.rstrip('/').replace('/generate','').replace('/edit','')}/generate",
-                    json={
-                        "prompt": state.get("enhanced_prompt") or prompt,
-                        "negative_prompt": state.get("negative_prompt"),
-                        "case_type": "criminal",
-                        "age": 30
-                    },
-                    timeout=180,
+        # Extract age from profile
+        age = 30
+        profile_age = profile.age_range
+        if profile_age:
+            nums = re.findall(r"\d+", str(profile_age))
+            if nums:
+                age = int(nums[0])
+
+        def _merge_critic_generate_prompt() -> str:
+            c = (state.get("critic_adjustment_prompt") or "").strip()
+            base = build_initial_generation_prompt(state)
+            if not c:
+                return base
+            if c.lower() in base.lower():
+                return base
+            return f"{base} Refinement requested: {c}"
+
+        if action == "generate" or (action == "retry" and state.get("current_image") is None):
+            gen_prompt = (
+                state.get("critic_adjustment_prompt")
+                or build_initial_generation_prompt(state)
+            )
+            if action == "retry" and state.get("critic_adjustment_prompt"):
+                gen_prompt = _merge_critic_generate_prompt()
+            return self._call_remote_generate(state, gen_prompt, age)
+
+        # Critic retry after a /generate pass: re-call /generate (Modal /edit often fails here).
+        if action == "retry" and state.get("current_image") is not None:
+            last_route = (state.get("generation_params") or {}).get("last_ml_route")
+            if last_route == "generate" or last_route is None:
+                print(
+                    "[Artist/remote/retry] last_ml_route=%s -> re-generate with critic guidance"
+                    % (last_route,)
                 )
-                if resp.status_code == 200:
-                    data = resp.json()
-                    if data.get("success") and data.get("image_base64"):
-                        img_bytes = base64.b64decode(data["image_base64"])
-                        pil_img   = _Image.open(_io.BytesIO(img_bytes)).convert("RGB")
-                        return {
-                            "current_image": pil_img,
-                            "generation_id": data.get("generation_id"),
-                            "critic_report": data.get("critic_report"),
-                            "generation_params": {
-                                **(state.get("generation_params") or {}),
-                                "last_identity_score": None,
-                            },
-                        }
-            except Exception as e:
-                print(f"[Artist/remote/generate] {e}")
-            return None
+                out = self._call_remote_generate(state, _merge_critic_generate_prompt(), age)
+                if out is not None:
+                    return out
+                if last_route == "generate":
+                    return None
 
         # ---- /edit or /inpaint (both hit /edit on the remote Modal service) ----
+        if action not in ("edit", "inpaint", "retry"):
+            return None
+
         current_image = state.get("current_image")
         if current_image is None:
             return None
 
-        last_msg = state["messages"][-1]
         edit_prompt = (
             state.get("critic_adjustment_prompt")
             or state.get("enhanced_prompt")
-            or (last_msg.content if hasattr(last_msg, "content") else str(last_msg))
+            or self._last_user_message_text(state)
         )
 
         # Encode image
@@ -193,9 +285,9 @@ class SmartSketchAgent:
                 json={
                     "generation_id": state.get("generation_id", "agent"),
                     "original_image": img_b64,
-                    "edit_prompt":    edit_prompt,
+                    "edit_prompt": edit_prompt,
                     "negative_prompt": state.get("negative_prompt"),
-                    "strength":       0.65,
+                    "strength": 0.65,
                 },
                 timeout=180,
             )
@@ -203,18 +295,43 @@ class SmartSketchAgent:
                 data = resp.json()
                 if data.get("success") and data.get("edited_image"):
                     edited_bytes = base64.b64decode(data["edited_image"])
-                    pil_edited   = _Image.open(_io.BytesIO(edited_bytes)).convert("RGB")
+                    pil_edited = _Image.open(_io.BytesIO(edited_bytes)).convert("RGB")
+                    modal_scores = data.get("scores") or {}
+                    prev = state.get("generation_params") or {}
+                    ident = data.get("identity_score")
+                    if ident is None:
+                        ident = modal_scores.get("identity_score")
+                    if ident is None:
+                        ident = prev.get("last_identity_score")
                     return {
                         "current_image": pil_edited,
                         "generation_id": data.get("edit_id", state.get("generation_id")),
                         "critic_report": data.get("critic_report"),
                         "generation_params": {
-                            **(state.get("generation_params") or {}),
-                            "last_identity_score": data.get("identity_score"),
+                            **prev,
+                            "last_identity_score": ident,
+                            "last_ml_route": "edit",
+                            "modal_scores": modal_scores,
                         },
                     }
+                print(
+                    "[Artist/remote/edit] Modal response without image: "
+                    f"success={data.get('success')} err={data.get('error')}"
+                )
+            else:
+                print(f"[Artist/remote/edit] HTTP {resp.status_code}: {resp.text[:500]}")
+        except requests.exceptions.Timeout:
+            print("[Artist/remote/edit] ERROR: Request timed out after 180s")
         except Exception as e:
-            print(f"[Artist/remote/edit] {e}")
+            if hasattr(e, "response") and e.response is not None:
+                print(f"[Artist/remote/edit] ERROR {e.response.status_code}: {e.response.text}")
+            else:
+                print(f"[Artist/remote/edit] EXCEPTION: {e}")
+
+        if action == "retry":
+            print("[Artist/remote/retry] /edit failed; falling back to /generate")
+            return self._call_remote_generate(state, _merge_critic_generate_prompt(), age)
+
         return None
 
     def _call_remote_age(self, state: ForensicAgentState) -> Optional[Dict[str, Any]]:
@@ -264,8 +381,13 @@ class SmartSketchAgent:
                             "last_identity_score": data.get("identity_score"),
                         },
                     }
+        except requests.exceptions.Timeout:
+            print(f"[Artist/remote/age] ERROR: Request timed out after 180s")
         except Exception as e:
-            print(f"[Artist/remote/age] {e}")
+            if hasattr(e, 'response') and e.response is not None:
+                print(f"[Artist/remote/age] ERROR {e.response.status_code}: {e.response.text}")
+            else:
+                print(f"[Artist/remote/age] EXCEPTION: {e}")
         return None
 
     # ------------------------------------------------------------------
@@ -292,8 +414,11 @@ class SmartSketchAgent:
     def _local_generate(self, state: ForensicAgentState) -> Dict[str, Any]:
         import re
         profile: SuspectProfile = state.get("suspect_profile") or SuspectProfile()
-        prompt = profile.to_detailed_prompt()
-        print(f"[Artist/local/generate] prompt: {prompt}")
+        prompt = (
+            state.get("critic_adjustment_prompt")
+            or build_initial_generation_prompt(state)
+        )
+        print(f"[Artist/local/generate] prompt: {prompt[:220]}")
 
         age: int = 30
         if profile.age_range and profile.age_range not in ("unknown", "neutral"):
@@ -302,7 +427,7 @@ class SmartSketchAgent:
                 age = int(nums[0])
 
         result = self.pipeline.generate_sketch(
-            prompt=state.get("critic_adjustment_prompt") or state.get("enhanced_prompt") or prompt,
+            prompt=prompt,
             negative_prompt=state.get("negative_prompt"),
             case_type="criminal",
             age=age,
@@ -464,6 +589,7 @@ class SmartSketchAgent:
             # First turn — initialise state
             inputs["suspect_profile"]   = SuspectProfile()
             inputs["iteration_count"]   = 0
+            inputs["ml_attempt_count"]  = 0
             inputs["next_step"]         = "analyze"
             inputs["current_image"]     = None
             inputs["generation_id"]     = None

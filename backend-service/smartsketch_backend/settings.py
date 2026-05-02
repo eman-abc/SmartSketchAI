@@ -54,7 +54,7 @@ ML_CONFIG = {
     'LOW_VRAM_MODE': os.environ.get('LOW_VRAM_MODE', 'False').lower() == 'true',
     'ENABLE_FORENSIC_CRITIC': os.environ.get('SMARTSKETCH_ENABLE_FORENSIC_CRITIC', 'True').lower() == 'true',
     'CRITIC_MODEL': os.environ.get('SMARTSKETCH_CRITIC_MODEL', 'Qwen/Qwen2.5-VL-3B-Instruct'),
-    'CRITIC_MAX_RETRIES': int(os.environ.get('SMARTSKETCH_CRITIC_MAX_RETRIES', '2')),
+    'CRITIC_MAX_RETRIES': int(os.environ.get('SMARTSKETCH_CRITIC_MAX_RETRIES', '1')),
     # Remote ML URL: defaults to COLAB_ML_URL so only one env var is needed
     # Use REMOTE_ML_URL to override the Modal endpoint if desired.
     'REMOTE_ML_URL': (

@@ -102,11 +102,15 @@ class FaceGenerator:
         Returns:
             PIL Image
         """
-        # Default negative prompt for forensic realism
+        # Default negative prompt for forensic realism (anti-collage: SDXL+IP-Adapter
+        # can otherwise drift toward contact-sheet / multi-panel layouts).
         base_negative = (
             "anime, cartoon, 3d render, stylized, unrealistic, "
             "colorful, illustration, painting, fantasy, video game, "
-            "neon, oversaturated"
+            "neon, oversaturated, "
+            "multiple faces, multiple people, crowd, group photo, collage, "
+            "contact sheet, grid of faces, photo grid, split screen, mosaic, "
+            "tiled portraits, film strip, lineup, array of faces"
         )
         if negative_prompt:
             negative_prompt = f"{base_negative}, {negative_prompt}"
@@ -139,6 +143,7 @@ class FaceGenerator:
             generator=generator,
             width=width,
             height=height,
+            num_images_per_prompt=1,
             **kwargs
         ).images[0]
         

@@ -157,6 +157,7 @@ class FaceInpainter:
                 strength=strength,
                 num_inference_steps=num_inference_steps,
                 generator=generator,
+                num_images_per_prompt=1,
                 **kwargs
             ).images[0]
 

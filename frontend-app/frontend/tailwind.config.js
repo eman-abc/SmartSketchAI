@@ -8,30 +8,30 @@ export default {
   theme: {
     extend: {
       colors: {
-        background: '#0b1220',
-        surface: '#111827',
-        panel: '#161e35',
+        background: 'var(--bg)',
+        surface: 'var(--surface)',
+        panel: 'var(--panel)',
         brand: {
-          DEFAULT: '#38bdf8',
-          secondary: '#818cf8',
+          DEFAULT: 'var(--brand)',
+          secondary: 'var(--brand-secondary)',
         },
-        muted: '#94a3b8',
-        success: '#34d399',
-        warning: '#fbbf24',
-        danger: '#fb7185',
-        'text-high': '#f8fafc',
-        'text-muted': '#94a3b8',
+        muted: 'var(--text-muted)',
+        success: 'var(--success)',
+        warning: 'var(--warning)',
+        danger: 'var(--danger)',
+        'text-high': 'var(--text)',
+        'text-muted': 'var(--text-muted)',
       },
       borderColor: {
-        studio: 'rgba(148, 163, 184, 0.18)',
+        studio: 'var(--border-subtle)',
       },
       ringColor: {
-        studio: 'rgba(148, 163, 184, 0.18)',
+        studio: 'var(--border-subtle)',
       },
       boxShadow: {
-        'soft-glow': '0 0 40px rgba(56, 189, 248, 0.18)',
-        'soft-glow-hover': '0 0 48px rgba(129, 140, 248, 0.16)',
-        panel: '0 30px 60px -30px rgba(15, 23, 42, 0.8)',
+        'soft-glow': '0 0 40px var(--shadow-glow)',
+        'soft-glow-hover': '0 0 48px var(--shadow-glow-strong)',
+        panel: '0 30px 60px -30px var(--shadow-panel)',
       },
       keyframes: {
         'fade-in': {

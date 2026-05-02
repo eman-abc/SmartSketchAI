@@ -97,7 +97,7 @@ class SmartSketchService:
             enable_restoration=True,
             enable_safety=False,  # ← add this
         )
-        print("[SmartSketch] ✅ All models loaded in-memory (SDXL, Qwen, CLIP, GFPGAN)")
+        print("[SmartSketch] [OK] All models loaded in-memory (SDXL, Qwen, CLIP, GFPGAN)")
 
     # ─────────────────────────────────────────────────────────────────────────
     @modal.method()
@@ -256,7 +256,7 @@ class SmartSketchService:
         finally:
             _cleanup_cuda()
 
-    def _analyze_with_self_healing(self, system_prompt: str, user_message: str, max_retries: int = 3) -> str | None:
+    def _analyze_with_self_healing(self, system_prompt: str, user_message: str, max_retries: int = 1) -> str | None:
         """Call the local validator and retry if the response cannot be parsed as valid JSON."""
         prompt = user_message
 
@@ -464,12 +464,15 @@ Return ONLY a valid JSON object with this schema:
   "issues": ["short issue"],
   "matched_features": ["feature visible in image"],
   "missing_features": ["feature missing or weak"],
-  "prompt_adjustment": "one concise SDXL edit/regeneration instruction, empty when accepted",
+  "prompt_adjustment": "one concise SDXL edit/regeneration instruction (e.g. 'Adjust age to 15 years', 'Add stubble'), empty when accepted",
   "safety_flags": ["flag if any"],
   "reasoning_summary": "one concise audit-friendly sentence"
 }}
 
-Revise only when a visible mismatch can be corrected by a concrete prompt adjustment.
+REVISION RULES:
+1. Only 'revise' if there is a clear forensic mismatch (e.g., identity drift, wrong ethnicity, or extreme age discrepancy).
+2. For age progression, use neutral terms like 'Adjust age to X years' instead of 'Increase/Decrease'.
+3. If the image is a 'Good' or 'Fair' match (score > 50), prefer 'accept' unless the mismatch is critical for evidence.
 
 Suspect profile JSON:
 {json.dumps(body.get("suspect_profile") or {}, ensure_ascii=False)}
@@ -560,4 +563,4 @@ def keep_warm():
     SmartSketchService().generate.remote({
         "prompt": "warmup ping", "case_type": "missing", "age": 25
     })
-    print("[keep_warm] Container is warm ✅")
+    print("[keep_warm] Container is warm [OK]")

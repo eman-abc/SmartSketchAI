@@ -45,8 +45,8 @@ class FaceRestorer:
             _, _, restored_img = self.restorer.enhance(
                 img_cv2,
                 has_aligned=False,
-                only_center_face=False,
-                paste_back=True
+                only_center_face=True,
+                paste_back=True,
             )
             restored_img = restored_img[:, :, ::-1]  # BGR to RGB
             return Image.fromarray(restored_img)

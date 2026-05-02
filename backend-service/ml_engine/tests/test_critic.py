@@ -51,7 +51,8 @@ class VerificationCriticTests(unittest.TestCase):
         image = Image.new("RGB", (64, 64), "white")
         state = {
             "current_image": image,
-            "iteration_count": 1,
+            "iteration_count": 50,
+            "ml_attempt_count": 1,
             "suspect_profile": SuspectProfile(gender="male"),
             "generation_params": {},
             "next_step": "generate",
@@ -81,6 +82,7 @@ class VerificationCriticTests(unittest.TestCase):
             {
                 "current_image": Image.new("RGB", (64, 64), "white"),
                 "iteration_count": 1,
+                "ml_attempt_count": 1,
                 "suspect_profile": SuspectProfile(),
                 "generation_params": {},
                 "next_step": "generate",

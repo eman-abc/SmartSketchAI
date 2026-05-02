@@ -70,12 +70,19 @@ class FaceScorer:
         with torch.no_grad():
             image_features = self.clip_model.encode_image(image_input)
             text_features = self.clip_model.encode_text(text_input)
+            
             image_features /= image_features.norm(dim=-1, keepdim=True)
             text_features /= text_features.norm(dim=-1, keepdim=True)
+            
+            # Use logit scale (logit_scale is a learnable param in CLIP, usually ~100)
+            logit_scale = self.clip_model.logit_scale.exp().item()
             similarity = (image_features @ text_features.T).item()
-        
-        # Normalize to 0-1
-        return (similarity + 1) / 2
+            
+            # Re-scale to a more sensitive 0-1 range for UI display
+            # 0.35+ is usually a strong match in CLIP
+            scaled_sim = (similarity * logit_scale) / 100.0
+            
+        return max(0.0, min(1.0, (scaled_sim + 0.1) / 0.5))
     
     def get_combined_score(
         self, 

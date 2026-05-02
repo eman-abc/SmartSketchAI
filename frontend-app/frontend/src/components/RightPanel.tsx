@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { CriticReport, GenerateResult, EditResult, ForensicLogEntry } from '../types';
 import { convertSketchStyle, exportForensicReport, ageForensicSketch } from '../lib/api';
 import ForensicConsole from './ForensicConsole';
@@ -42,6 +42,17 @@ export default function RightPanel({
   const [exportError, setExportError] = useState<string | null>(null);
   const [years, setYears] = useState(15);
   const [ageLoading, setAgeLoading] = useState(false);
+
+  useEffect(() => {
+    if (generateResult == null && editResult == null) {
+      setStyledImageUrl(null);
+      setActiveStyle('photo');
+      setStyleLoading(false);
+      setExportLoading(false);
+      setExportError(null);
+      setAgeLoading(false);
+    }
+  }, [generateResult, editResult]);
 
   const hasGenerate = generateResult != null;
   const hasEdit = editResult != null;
