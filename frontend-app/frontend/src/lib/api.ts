@@ -179,6 +179,7 @@ export async function editForensicSketch(body: {
 export async function ageForensicSketch(body: {
   original_image_id: number;
   years: number;
+  prompt?: string;
 }) {
   return request<any>('forensic/age/', {
     method: 'POST',
@@ -291,7 +292,7 @@ export async function agentChatStream(
 /** POST /api/forensic/sketch-style/ — convert to pencil/charcoal */
 export async function convertSketchStyle(body: {
   generation_id: string;
-  style: 'pencil' | 'charcoal';
+  style: 'pencil' | 'charcoal' | 'forensic';
 }) {
   return request<any>('forensic/sketch-style/', {
     method: 'POST',

@@ -13,12 +13,13 @@ type RightPanelProps = {
   isGenerating?: boolean;
 };
 
-type SketchStyle = 'photo' | 'pencil' | 'charcoal';
+type SketchStyle = 'photo' | 'pencil' | 'charcoal' | 'forensic';
 
 const STYLE_LABELS: Record<SketchStyle, string> = {
   photo: 'Photo',
   pencil: 'Pencil',
   charcoal: 'Charcoal',
+  forensic: 'Forensic',
 };
 
 function scorePercent(value: number | undefined | null): number {
@@ -119,6 +120,7 @@ export default function RightPanel({
       const res = await ageForensicSketch({
         original_image_id: originalImageId,
         years,
+        prompt: displayPrompt || undefined,
       });
       onUpdateResult?.(res);
     } catch {

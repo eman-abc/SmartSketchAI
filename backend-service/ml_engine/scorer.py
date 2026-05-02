@@ -43,15 +43,8 @@ class FaceScorer:
     ) -> Dict:
         """
         Score a generated image
-        
-        Args:
-            image: PIL Image
-            prompt: Text description
-            identity_score: Score for identity preservation (optional)
-        
-        Returns:
-            Dictionary with scores and interpretation
         """
+        print(f"[DEBUG] score_generation: identity_score={identity_score} (type={type(identity_score)})")
         clip_score = self.compute_clip_score(image, prompt)
         return self.get_combined_score(clip_score, identity_score=identity_score)
     
@@ -107,7 +100,7 @@ class FaceScorer:
         
         return {
             "clip_score": round(clip_score, 3),
-            "identity_score": round(identity_score, 3) if identity_score else None,
+            "identity_score": round(identity_score, 3) if identity_score is not None else None,
             "combined_score": round(combined, 2),
             "interpretation": self._interpret_score(combined)
         }

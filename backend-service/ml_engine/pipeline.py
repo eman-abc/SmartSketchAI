@@ -78,6 +78,7 @@ class SmartSketchPipeline:
         case_type: str = "criminal",
         age: Optional[int] = None,
         seed: Optional[int] = None,
+        negative_prompt: Optional[str] = None,
         num_inference_steps: int = 30,
         output_type: Literal["photo", "sketch"] = "photo",
         sketch_style: Literal["pencil", "charcoal", "forensic"] = "forensic",
@@ -132,6 +133,7 @@ class SmartSketchPipeline:
             
             photo_image = self.generator.generate_face(
                 prompt=enhanced_prompt,
+                negative_prompt=negative_prompt,
                 seed=seed,
                 num_inference_steps=num_inference_steps
             )
@@ -263,7 +265,8 @@ class SmartSketchPipeline:
         original_image: Image.Image,
         edit_prompt: str,
         strength: Optional[float] = None,
-        seed: Optional[int] = None
+        seed: Optional[int] = None,
+        negative_prompt: Optional[str] = None
     ) -> Dict:
         """
         Edit an existing face
@@ -329,7 +332,8 @@ class SmartSketchPipeline:
             original_image=original_image,
             edit_prompt=enhanced_edit,
             strength=strength,
-            seed=seed
+            seed=seed,
+            negative_prompt=negative_prompt
         )
 
         # --- Step 2b: Face Restoration ---
@@ -394,6 +398,7 @@ class SmartSketchPipeline:
         target_region: Optional[str] = None,
         strength: float = 0.75,
         seed: Optional[int] = None,
+        negative_prompt: Optional[str] = None,
         age: int = 25,
         case_type: str = "criminal",
     ) -> Dict:
@@ -418,7 +423,8 @@ class SmartSketchPipeline:
             prompt=enhanced_edit,
             target_region=target_region,
             strength=strength,
-            seed=seed
+            seed=seed,
+            negative_prompt=negative_prompt
         )
 
         # --- Step 2b: Face Restoration ---
@@ -429,7 +435,12 @@ class SmartSketchPipeline:
 
         if result['success']:
             # Step 3: Score
-            scores = self.scorer.score_generation(result['edited_image'], enhanced_edit)
+            identity_score = result.get('identity_score')
+            scores = self.scorer.score_generation(
+                image=result['edited_image'],
+                prompt=enhanced_edit,
+                identity_score=identity_score
+            )
             result['scores'] = scores
             result['generation_id'] = generation_id
 

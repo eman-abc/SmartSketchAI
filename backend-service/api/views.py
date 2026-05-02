@@ -184,9 +184,19 @@ def generate_forensic_sketch(request):
         _base = normalize_ml_base_url(REMOTE_ML_URL)
         ml_url = f"{_base}/generate"
         try:
+            sketch_style = request.data.get("sketch_style", "pencil")
+            seed = request.data.get("seed")
+
             ml_resp = requests.post(
                 ml_url,
-                json={"prompt": prompt, "case_type": case_type, "age": age},
+                json={
+                    "prompt": prompt, 
+                    "case_type": case_type, 
+                    "age": age,
+                    "output_type": output_type,
+                    "sketch_style": sketch_style,
+                    "seed": seed
+                },
                 headers={
                     "ngrok-skip-browser-warning": "1",
                     "User-Agent": "SmartSketch-Django/1.0",
@@ -369,7 +379,9 @@ def edit_forensic_sketch(request):
                     "generation_id": f"gen_{generated_image.id}",
                     "original_image": original_image_b64,
                     "edit_prompt": edit_prompt,
+                    "negative_prompt": request.data.get("negative_prompt"),
                     "strength": strength,
+                    "seed": request.data.get("seed")
                 },
                 headers={
                     "ngrok-skip-browser-warning": "1",
@@ -551,6 +563,8 @@ def age_forensic_sketch(request):
                     "generation_id": f"gen_{generated_image.id}",
                     "original_image": original_image_b64,
                     "years": years,
+                    "prompt": request.data.get("prompt") or request.data.get("enhanced_prompt"),
+                    "seed": request.data.get("seed")
                 },
                 headers={
                     "ngrok-skip-browser-warning": "1",

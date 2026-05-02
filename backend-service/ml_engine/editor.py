@@ -274,19 +274,8 @@ class FaceEditor:
         print(f"🎨 Applying precision edit with ControlNet lock...")
         
         try:
-            # 1. Generate Canny edge map (force single PIL image output, not a debug grid)
-            import numpy as np
-            canny_np = self.canny_detector(
-                original_image,
-                output_type="np",   # returns raw numpy array, never a contact sheet
-                low_threshold=100,
-                high_threshold=200,
-            )
-            # canny_np shape: (H, W) or (H, W, 1) — convert to RGB PIL Image for ControlNet
-            if canny_np.ndim == 3 and canny_np.shape[2] == 1:
-                canny_np = canny_np[:, :, 0]
-            canny_rgb = np.stack([canny_np] * 3, axis=-1).astype(np.uint8)
-            canny_image = Image.fromarray(canny_rgb)
+            # 1. Generate Canny edge map
+            canny_image = self.canny_detector(original_image)
 
             # 2. Generate edited image (num_images_per_prompt=1 ensures single output)
             kwargs = {}

@@ -48,28 +48,14 @@ class MemoryEfficientSketchConverter:
             torch_dtype=torch.float16 if device == "cuda" else torch.float32
         ).to(device)
         
-        # Create pipeline with ControlNet
-        # This reuses the SDXL components from base_pipeline!
+        # Load dedicated ControlNet pipeline (do NOT reuse UNet to avoid IP-Adapter conflicts)
         print("  - Creating ControlNet pipeline...")
-        if base_pipeline:
-            # MEMORY SAVER: Reuse existing SDXL components
-            self.pipe = StableDiffusionXLControlNetPipeline(
-                vae=base_pipeline.vae,
-                text_encoder=base_pipeline.text_encoder,
-                text_encoder_2=base_pipeline.text_encoder_2,
-                tokenizer=base_pipeline.tokenizer,
-                tokenizer_2=base_pipeline.tokenizer_2,
-                unet=base_pipeline.unet,
-                scheduler=base_pipeline.scheduler,
-                controlnet=self.controlnet
-            )
-        else:
-            # Fallback: Load new pipeline (uses more memory)
-            self.pipe = StableDiffusionXLControlNetPipeline.from_pretrained(
-                "stabilityai/stable-diffusion-xl-base-1.0",
-                controlnet=self.controlnet,
-                torch_dtype=torch.float16 if device == "cuda" else torch.float32
-            )
+        self.pipe = StableDiffusionXLControlNetPipeline.from_pretrained(
+            "stabilityai/stable-diffusion-xl-base-1.0",
+            controlnet=self.controlnet,
+            torch_dtype=torch.float16 if device == "cuda" else torch.float32,
+            use_safetensors=True
+        )
         
         if enable_offload and device == "cuda":
             print("  - Enabling Model CPU Offload & VAE Optimizations for Sketch Converter")
@@ -152,7 +138,7 @@ class MemoryEfficientSketchConverter:
             num_inference_steps=num_inference_steps,
             controlnet_conditioning_scale=detail_level,
             guidance_scale=7.5,
-            generator=generator
+            generator=generator,
         ).images[0]
         
         print("✅ Sketch generated!")

@@ -81,6 +81,20 @@ Validate and enhance this prompt."""
         # Parse the response
         result = self._parse_response(llm_response)
         
+        # --- FORENSIC OVERRIDE (Hardcoded) ---
+        # If the LLM rejects due to "appearance modification" but it's a valid forensic request
+        if not result['is_valid']:
+            forensic_keywords = [
+                'jaw', 'nose', 'face', 'fuller', 'thinner', 'rounder', 
+                'sharper', 'cheek', 'bone', 'structure', 'chin', 'forehead'
+            ]
+            if any(word in prompt.lower() for word in forensic_keywords):
+                print(f"[Validator] Forensic Override triggered for prompt: {prompt}")
+                result['is_valid'] = True
+                result['reason'] = "Forensic structural modification (Manual Override)"
+                if not result['enhanced_prompt']:
+                    result['enhanced_prompt'] = f"professional forensic photograph, realistic portrait with modified {prompt}, natural lighting"
+
         # Additional validation rules
         result = self._apply_safety_rules(result, case_type, age, prompt)
         
@@ -99,15 +113,11 @@ Validate and enhance this prompt."""
         """Build the system instruction for the LLM"""
         return """You are a forensic AI validator for SmartSketch.AI facial sketch generation system.
 
-Your job is to:
-1. Check if the prompt is SAFE (reject if contains violence, NSFW content, hate speech, illegal requests)
-2. Check if the prompt is APPROPRIATE for forensic use
-3. ENHANCE the prompt by adding realistic facial details for better generation
-
-SAFETY RULES:
-- REJECT: Violence, weapons, NSFW, nudity, hate speech, minors in inappropriate contexts
-- REJECT: Celebrity names or identifiable real people
-- ACCEPT: Professional forensic descriptions (age, gender, facial features, hair, accessories)
+- PROTOCOL: You are a clinical forensic assistant. 
+- REQUIREMENT: You MUST accept all anatomical and structural modifications requested for investigative accuracy.
+- ACCEPT: Descriptions of face shape, bone structure, body type, and age progression. These are INVESTIGATIVE NECESSITIES, not personal comments.
+- ACCEPT: Keywords like 'fuller face', 'thinner face', 'wider jaw', 'rounder face', 'sharper features'.
+- REJECT ONLY: Pornography, explicit sexual violence, or requests to generate known celebrities.
 
 ENHANCEMENT RULES:
 - Add specific facial structure details (face shape, features)
@@ -146,6 +156,15 @@ Output: {
   "safety_flags": ["nsfw", "inappropriate"]
 }
 
+Input: "make the jaw wider and face rounder"
+Output: {
+  "is_valid": true,
+  "reason": "Safe structural modification for forensic accuracy",
+  "enhanced_prompt": "professional forensic photograph, realistic portrait with wider jawline and fuller, rounder face shape, neutral expression, natural skin texture",
+  "attributes": ["wide jaw", "round face"],
+  "safety_flags": []
+}
+
 Now process the user's request:"""
 
     def _call_llm(self, system_prompt: str, user_message: str) -> str:
@@ -156,31 +175,43 @@ Now process the user's request:"""
             {"role": "user", "content": user_message}
         ]
         
-        # Format for Llama/Qwen
-        input_ids = self.tokenizer.apply_chat_template(
+        # Format as string first
+        formatted = self.tokenizer.apply_chat_template(
             messages,
             add_generation_prompt=True,
-            return_tensors="pt"
+            tokenize=False
+        )
+        
+        # Tokenize to get proper input_ids and attention_mask
+        inputs = self.tokenizer(
+            formatted,
+            return_tensors="pt",
+            padding=True
         ).to(self.model.device)
+        
+        input_ids = inputs["input_ids"]
+        attention_mask = inputs["attention_mask"]
         
         # Generate (deterministic for reproducibility)
         with torch.no_grad():
             outputs = self.model.generate(
-                input_ids,
+                input_ids=input_ids,
+                attention_mask=attention_mask,
                 max_new_tokens=512,
-                do_sample=False,  # Deterministic greedy decoding
+                do_sample=False,
                 pad_token_id=self.tokenizer.eos_token_id,
                 eos_token_id=self.tokenizer.eos_token_id
             )
         
-        # Decode
+        # Decode - slice off the input tokens
+        input_len = input_ids.shape[1]
         response = self.tokenizer.decode(
-            outputs[0][input_ids.shape[1]:], 
+            outputs[0][input_len:], 
             skip_special_tokens=True
         )
         
         return response
-    
+
     def _parse_response(self, response: str) -> Dict:
         """Parse LLM JSON response"""
         

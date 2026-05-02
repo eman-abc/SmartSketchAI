@@ -40,14 +40,14 @@ image = (
         "pip install -q controlnet-aux==0.0.9 opencv-python-headless==4.10.0.84 scikit-image==0.24.0 mediapipe invisible-watermark mtcnn",
         "pip install -q langgraph>=1.1.5 langchain-core>=1.2.10 pydantic>=2.0",
         "pip install -q gfpgan facexlib basicsr",
+        # basicsr uses a removed torchvision API (functional_tensor was dropped in 0.16+)
+        "find /usr/local/lib/python3.11/site-packages/basicsr -type f -name '*.py' -exec sed -i 's/torchvision.transforms.functional_tensor/torchvision.transforms.functional/g' {} +",
         "pip install -q facenet-pytorch --no-deps",
         "pip install -q git+https://github.com/openai/CLIP.git",
         "mkdir -p /models && curl -L -o /models/GFPGANv1.4.pth https://github.com/TencentARC/GFPGAN/releases/download/v1.3.0/GFPGANv1.4.pth",
+        "echo 'Force rebuild 1'",
     )
-    .add_local_dir(
-        LOCAL_ML_ENGINE,
-        remote_path="/root/ml_engine"
-    )
+    .add_local_dir(LOCAL_ML_ENGINE, remote_path="/root/ml_engine")
 )
 
 # ── 3. Persistent volume — model weights survive container restarts ───────────
@@ -55,7 +55,7 @@ volume = modal.Volume.from_name("smartsketch-models", create_if_missing=True)
 MODEL_DIR = "/modal_models"
 
 # ── 4. Modal app ─────────────────────────────────────────────────────────────
-app = modal.App("smartsketch-ml", image=image)
+app = modal.App("smartsketch-ml-v4", image=image)
 
 web_app = FastAPI(title="SmartSketch ML API")
 
@@ -64,16 +64,17 @@ web_app = FastAPI(title="SmartSketch ML API")
 @app.cls(
     gpu=os.environ.get("MODAL_GPU", "L4"),
     volumes={MODEL_DIR: volume},
-    timeout=300,
-    scaledown_window=120,        # keep warm 2 min between requests
+    timeout=603,
+    secrets=[modal.Secret.from_name("huggingface")],
+    scaledown_window=120,
 )
 class SmartSketchService:
 
     @modal.enter()
     def load_pipeline(self):
-        """Runs once when the container starts. Loads all model weights."""
         import sys
         import os
+        import pathlib
 
         if "/root" not in sys.path:
             sys.path.insert(0, "/root")
@@ -94,6 +95,7 @@ class SmartSketchService:
             enable_editing=True,
             enable_inpainting=True,
             enable_restoration=True,
+            enable_safety=False,  # ← add this
         )
         print("[SmartSketch] ✅ All models loaded in-memory (SDXL, Qwen, CLIP, GFPGAN)")
 
@@ -322,10 +324,12 @@ class SmartSketchService:
         return text
 
 
+
 @app.cls(
-    gpu=os.environ.get("MODAL_CRITIC_GPU", os.environ.get("MODAL_GPU", "L4")),
+    gpu=os.environ.get("MODAL_GPU", "L4"),
     volumes={MODEL_DIR: volume},
-    timeout=180,
+    timeout=600,
+    secrets=[modal.Secret.from_name("huggingface")],  # ← add this
     scaledown_window=120,
 )
 class ForensicCriticService:
@@ -508,7 +512,6 @@ def _parse_critic_json(text: str) -> dict:
     return data
 
 
-# ── 7. FastAPI ASGI endpoint (replaces the legacy Colab Flask server) ───────────────────
 @app.function()
 @modal.asgi_app()
 def fastapi_app():
@@ -520,36 +523,35 @@ def fastapi_app():
 
     @web_app.post("/generate")
     async def generate(request: Request):
-        body   = await request.json()
-        result = service.generate.remote(body)
+        body = await request.json()
+        result = await service.generate.remote.aio(body)   # ← .aio()
         return JSONResponse(result)
 
     @web_app.post("/edit")
     async def edit(request: Request):
-        body   = await request.json()
-        result = service.edit.remote(body)
+        body = await request.json()
+        result = await service.edit.remote.aio(body)       # ← .aio()
         return JSONResponse(result)
 
     @web_app.post("/age")
     async def age(request: Request):
-        body   = await request.json()
-        result = service.age.remote(body)
+        body = await request.json()
+        result = await service.age.remote.aio(body)        # ← .aio()
         return JSONResponse(result)
 
     @web_app.post("/analyze")
     async def analyze(request: Request):
-        body   = await request.json()
-        result = service.analyze.remote(body)
+        body = await request.json()
+        result = await service.analyze.remote.aio(body)    # ← .aio()
         return JSONResponse(result)
 
     @web_app.post("/critic")
     async def critic(request: Request):
         body = await request.json()
-        result = ForensicCriticService().analyze.remote(body)
+        result = await ForensicCriticService().analyze.remote.aio(body)  # ← .aio()
         return JSONResponse(result)
 
     return web_app
-
 
 # ── 8. Optional: keep-warm cron (prevents cold starts during business hours) ──
 # @app.function(schedule=modal.Cron("*/15 8-22 * * 1-6"))  # every 15 min, weekdays+Sat

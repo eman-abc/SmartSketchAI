@@ -123,9 +123,13 @@ class FaceGenerator:
             generator = None
         
         # Generate
-        kwargs = {}
         if reference_image is not None:
-            kwargs["ip_adapter_image"] = reference_image
+            self.pipe.set_ip_adapter_scale(0.6)
+            kwargs = {"ip_adapter_image": reference_image}
+        else:
+            # If IP-Adapter is loaded, UNet still expects inputs even if scale is 0
+            self.pipe.set_ip_adapter_scale(0.0)
+            kwargs = {"ip_adapter_image": Image.new("RGB", (224, 224), (0, 0, 0))}
             
         image = self.pipe(
             prompt=full_prompt,
