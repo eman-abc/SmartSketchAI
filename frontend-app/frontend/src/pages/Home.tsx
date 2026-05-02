@@ -46,7 +46,7 @@ function Home() {
   return (
     <div className="h-screen w-screen overflow-hidden bg-forensic-studio text-text-high antialiased">
       <TopBar onNewSession={handleNewSession} />
-      <div className="mx-auto flex h-full min-h-0 flex-1 gap-6 overflow-hidden px-4 pb-6 pt-16 sm:px-6">
+      <div className="mx-auto flex h-full min-h-0 flex-1 gap-6 overflow-hidden px-4 pb-6 pt-24 sm:px-6">
         <Sidebar onSelectImage={handleSelectHistory} />
         <Workspace
           key={workspaceKey}

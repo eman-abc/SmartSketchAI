@@ -132,7 +132,7 @@ export default function RightPanel({
     value >= 70 ? 'bg-success' : value >= 55 ? 'bg-warning' : 'bg-muted/35';
 
   return (
-    <div className="flex h-full w-[22rem] shrink-0 flex-col gap-6 overflow-y-auto rounded-3xl border border-studio bg-panel/90 p-6 shadow-panel backdrop-blur-md animate-fade-in">
+    <div className="flex h-full w-[22rem] shrink-0 flex-col gap-6 overflow-y-auto rounded-3xl border border-studio bg-panel/90 px-6 pt-12 pb-6 shadow-panel backdrop-blur-md animate-fade-in">
       <div className="glass-card p-5 transition duration-200 ease-out hover:-translate-y-1">
         <div className="mb-4 flex items-center justify-between border-b border-studio pb-3">
           <h2 className="text-[11px] font-semibold uppercase tracking-[0.2em] text-muted">Sketch preview</h2>

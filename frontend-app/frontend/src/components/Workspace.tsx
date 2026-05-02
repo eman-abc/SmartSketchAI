@@ -263,7 +263,7 @@ export default function Workspace({
         </div>
       )}
 
-      <div className="studio-canvas-grid min-h-0 flex-1 overflow-y-auto px-5 py-6">
+      <div className="studio-canvas-grid min-h-0 flex-1 overflow-y-auto px-5 pt-12 pb-6">
         {messages.length === 0 && !loading && (
           <div className="mx-auto max-w-2xl px-4 pt-10 pb-8 text-center">
             <div className="glass-card mx-auto mb-6 inline-flex h-16 w-16 items-center justify-center rounded-3xl shadow-soft-glow">
