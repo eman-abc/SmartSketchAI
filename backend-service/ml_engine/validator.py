@@ -82,18 +82,27 @@ Validate and enhance this prompt."""
         result = self._parse_response(llm_response)
         
         # --- FORENSIC OVERRIDE (Hardcoded) ---
-        # If the LLM rejects due to "appearance modification" but it's a valid forensic request
+        # If the LLM rejects due to false NSFW / overcautious parsing, accept standard witness vocabulary.
         if not result['is_valid']:
+            pl = prompt.lower()
             forensic_keywords = [
-                'jaw', 'nose', 'face', 'fuller', 'thinner', 'rounder', 
-                'sharper', 'cheek', 'bone', 'structure', 'chin', 'forehead'
+                'jaw', 'nose', 'face', 'fuller', 'thinner', 'rounder',
+                'sharper', 'cheek', 'bone', 'structure', 'chin', 'forehead',
+                'eye', 'lip', 'brow', 'hair', 'glasses', 'spectacle',
+                'stubble', 'beard', 'mustache', 'goatee', 'sideburn', 'facial hair',
+                'skin', 'texture', 'complexion', 'wrinkle', 'pore', 'freckle',
+                'scar', 'mole', 'blemish', 'smooth', 'rough', 'weathered', 'aged',
+                'tan', 'pale', 'lighter', 'darker', 'tone',
             ]
-            if any(word in prompt.lower() for word in forensic_keywords):
+            if any(word in pl for word in forensic_keywords):
                 print(f"[Validator] Forensic Override triggered for prompt: {prompt}")
                 result['is_valid'] = True
-                result['reason'] = "Forensic structural modification (Manual Override)"
+                result['reason'] = "Forensic appearance/structure (manual override — witness-appropriate language)"
                 if not result['enhanced_prompt']:
-                    result['enhanced_prompt'] = f"professional forensic photograph, realistic portrait with modified {prompt}, natural lighting"
+                    result['enhanced_prompt'] = (
+                        f"professional forensic photograph, realistic portrait: {prompt}, "
+                        "neutral expression, natural lighting"
+                    )
 
         # Additional validation rules
         result = self._apply_safety_rules(result, case_type, age, prompt)
@@ -117,6 +126,7 @@ Validate and enhance this prompt."""
 - REQUIREMENT: You MUST accept all anatomical and structural modifications requested for investigative accuracy.
 - ACCEPT: Descriptions of face shape, bone structure, body type, and age progression. These are INVESTIGATIVE NECESSITIES, not personal comments.
 - ACCEPT: Keywords like 'fuller face', 'thinner face', 'wider jaw', 'rounder face', 'sharper features'.
+- ACCEPT (critical): Witness descriptions of facial hair (stubble, beard, mustache, goatee, sideburns) and skin or aging (skin texture, smoother, rougher, weathered, wrinkles, pores, complexion, freckles, scars, moles, tan, pale) are standard forensic composite requests. NEVER mark these as NSFW or sexual.
 - REJECT ONLY: Pornography, explicit sexual violence, or requests to generate known celebrities.
 
 ENHANCEMENT RULES:
