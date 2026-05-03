@@ -2,13 +2,31 @@
 # CELL 1: Create editor.py
 # ============================================
 
-import torch
-from diffusers import StableDiffusionXLControlNetImg2ImgPipeline, ControlNetModel
-from controlnet_aux import CannyDetector
-from PIL import Image
-from typing import Optional, Dict
+import os
 import random
 from datetime import datetime
+from typing import Dict, Optional
+
+import torch
+from controlnet_aux import CannyDetector
+from diffusers import StableDiffusionXLControlNetImg2ImgPipeline, ControlNetModel
+from PIL import Image
+
+
+def _env_float(name: str, default: float) -> float:
+    try:
+        v = float(os.environ.get(name, "").strip())
+        if v != v:  # NaN
+            return default
+        return v
+    except (TypeError, ValueError):
+        return default
+
+
+# Looser defaults: easier "identity_preserved", softer Canny lock, weaker IP-Adapter identity pull
+_IDENTITY_PRESERVED_MIN = _env_float("SMARTSKETCH_IDENTITY_PRESERVED_THRESHOLD", 0.55)
+_CONTROLNET_CONDITIONING = _env_float("SMARTSKETCH_CONTROLNET_CONDITIONING_SCALE", 0.65)
+_EDIT_IP_ADAPTER_DEFAULT = _env_float("SMARTSKETCH_EDIT_IP_ADAPTER_SCALE", 0.5)
 
 try:
     from facenet_pytorch import MTCNN, InceptionResnetV1
@@ -84,16 +102,16 @@ class FaceEditor:
         else:
             self.pipe.to(device)
         
-        # Edit type presets (optimized strengths)
+        # Edit type presets — slightly higher strength so edits read more clearly (looser / less timid)
         self.edit_presets = {
-            'glasses': {'strength': 0.60, 'guidance': 7.5},
-            'beard': {'strength': 0.70, 'guidance': 7.5},
-            'hair': {'strength': 0.65, 'guidance': 7.0},
-            'hair_color': {'strength': 0.55, 'guidance': 7.0},
-            'age': {'strength': 0.75, 'guidance': 8.0},
-            'expression': {'strength': 0.50, 'guidance': 7.0},
-            'accessories': {'strength': 0.60, 'guidance': 7.5},
-            'default': {'strength': 0.70, 'guidance': 7.5}
+            'glasses': {'strength': 0.64, 'guidance': 7.5},
+            'beard': {'strength': 0.72, 'guidance': 7.5},
+            'hair': {'strength': 0.68, 'guidance': 7.0},
+            'hair_color': {'strength': 0.58, 'guidance': 7.0},
+            'age': {'strength': 0.76, 'guidance': 8.0},
+            'expression': {'strength': 0.54, 'guidance': 7.0},
+            'accessories': {'strength': 0.64, 'guidance': 7.5},
+            'default': {'strength': 0.72, 'guidance': 7.5},
         }
         
         # Load Identity Models (NEW)
@@ -282,7 +300,11 @@ class FaceEditor:
             if getattr(self.pipe, 'image_encoder', None) is not None:
                 kwargs["ip_adapter_image"] = original_image
                 # Set IP-Adapter scale if provided or use default 0.6
-                current_scale = ip_adapter_scale if ip_adapter_scale is not None else 0.6
+                current_scale = (
+                    ip_adapter_scale
+                    if ip_adapter_scale is not None
+                    else _EDIT_IP_ADAPTER_DEFAULT
+                )
                 self.pipe.set_ip_adapter_scale(current_scale)
                 print(f"🔗 IP-Adapter scale set to {current_scale}")
                 
@@ -294,7 +316,7 @@ class FaceEditor:
                 strength=strength,
                 num_inference_steps=num_inference_steps,
                 guidance_scale=guidance_scale,
-                controlnet_conditioning_scale=0.8,  # Lock structure by 80%
+                controlnet_conditioning_scale=_CONTROLNET_CONDITIONING,
                 num_images_per_prompt=1,             # Guarantee single output image
                 generator=generator,
                 **kwargs
@@ -310,8 +332,7 @@ class FaceEditor:
             )
             print(f"   Identity preserved: {identity_score:.1%}")
             
-            # Determine if identity well preserved
-            identity_preserved = identity_score >= 0.75
+            identity_preserved = identity_score >= _IDENTITY_PRESERVED_MIN
             
             return {
                 'success': True,

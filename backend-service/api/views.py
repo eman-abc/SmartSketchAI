@@ -31,6 +31,13 @@ def pil_to_content_file(image, filename):
     return ContentFile(buffer.getvalue(), name=filename)
 
 
+def pil_image_to_png_data_url(image) -> str:
+    """PNG data URL for SPA <img src>; avoids broken /media/ links when DEBUG=False or mixed content."""
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG")
+    return "data:image/png;base64," + base64.b64encode(buffer.getvalue()).decode("ascii")
+
+
 def normalize_ml_base_url(url):
     base = (url or "").strip().rstrip("/")
     for suffix in ("/generate", "/edit", "/age", "/analyze", "/critic"):
@@ -242,7 +249,7 @@ def generate_forensic_sketch(request):
                         return Response(
                             {
                                 "id": generated.id,
-                                "image_url": request.build_absolute_uri(generated.image_file.url),
+                                "image_url": f"data:image/png;base64,{image_b64}",
                                 "scores": scores,
                                 "metadata": ml_data.get("metadata", {}),
                                 "generation_id": generation_id,
@@ -308,7 +315,7 @@ def generate_forensic_sketch(request):
                 return Response(
                     {
                         "id": generated.id,
-                        "image_url": request.build_absolute_uri(generated.image_file.url),
+                        "image_url": pil_image_to_png_data_url(final_image),
                         "scores": scores,
                         "metadata": ml_data.get("metadata", {}),
                         "generation_id": generation_id,
@@ -742,7 +749,7 @@ def _forensic_agent_chat_payload(user, message, thread_id, case_number, request)
                     prompt_used=message,
                     image=generated,
                 )
-                image_url = request.build_absolute_uri(generated.image_file.url)
+                image_url = pil_image_to_png_data_url(pil_img)
                 saved_image_id = generated.id
                 print("[AgentChat] Image saved id=" + str(saved_image_id))
         except Exception as save_err:

@@ -73,6 +73,11 @@ SECRET_KEY = os.environ.get('SECRET_KEY', 'django-insecure-swbp&3w9ir*nj@!j)0^vy
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.environ.get('DEBUG', 'True').lower() == 'true'
 
+# Render: correct https scheme for build_absolute_uri() (media / edit URLs on HTTPS frontends)
+if os.environ.get("RENDER"):
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+    USE_X_FORWARDED_HOST = True
+
 # Allow the Vercel domain and Render domain
 ALLOWED_HOSTS = ['localhost', '127.0.0.1', '.onrender.com', 'smart-sketch-ai-idrj.vercel.app', 'smart-sketch-ai-idrj-cfm4lxcvj-eman-abcs-projects.vercel.app']
 

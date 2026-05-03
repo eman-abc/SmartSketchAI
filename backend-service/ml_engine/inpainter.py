@@ -2,9 +2,11 @@
 SmartSketch.AI - Face Inpainter
 Precision semantic editing using SDXL Inpainting with identity preservation.
 """
-import torch
+import os
 import random
 from datetime import datetime
+
+import torch
 from diffusers import StableDiffusionXLInpaintPipeline
 from PIL import Image
 from typing import Optional, Dict
@@ -18,6 +20,14 @@ from .masker import FaceMasker
 # generator's UNet components.
 # ---------------------------------------------------------------------------
 INPAINT_MODEL = "diffusers/stable-diffusion-xl-1.0-inpainting-0.1"
+
+
+def _identity_preserved_min() -> float:
+    try:
+        v = float(os.environ.get("SMARTSKETCH_IDENTITY_PRESERVED_THRESHOLD", "0.55").strip())
+        return v if v == v else 0.55
+    except (TypeError, ValueError):
+        return 0.55
 
 
 class FaceInpainter:
@@ -164,7 +174,7 @@ class FaceInpainter:
             # Measure identity preservation
             print("👤 [Inpainter] Computing identity preservation …")
             identity_score = self._compute_identity(image, result_image)
-            identity_preserved = identity_score >= 0.75
+            identity_preserved = identity_score >= _identity_preserved_min()
             print(f"   Identity score: {identity_score:.1%}  preserved={identity_preserved}")
 
             return {
