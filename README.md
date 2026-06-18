@@ -2,7 +2,7 @@
 
 SmartSketch.AI is a full-stack forensic facial composite platform that turns natural-language witness descriptions into iterative, refinable suspect portraits. Investigators interact through a chat-first interface while a LangGraph agent on the backend interprets each turn, routes to the appropriate generative tool, verifies output quality, and persists session state across restarts. Heavy GPU inference runs on Modal; the web API stays thin on Render; the React client ships on Vercel.
 
-This repository is the capstone implementation for a Bachelor of Engineering in Software Engineering project. It is designed as a production-shaped system: JWT authentication, audit hooks, structured agent state, serverless GPU workers, and explicit separation between orchestration policy and pixel synthesis.
+This repository is designed as a production-shaped system: JWT authentication, audit hooks, structured agent state, serverless GPU workers, and explicit separation between orchestration policy and pixel synthesis.
 
 
 
@@ -363,11 +363,3 @@ Full schemas: `backend-service/API_INTEGRATION_SPEC.md`.
 ---
 
 
-
-**Contributors:** Muqaddas Anees, Muqadas Zahra, Eman Chaudhary
-
----
-
-## License
-
-Contact the authors for reuse terms.
