@@ -4,6 +4,13 @@ SmartSketch.AI is a full-stack forensic facial composite platform that turns nat
 
 This repository is the capstone implementation for a Bachelor of Engineering in Software Engineering project. It is designed as a production-shaped system: JWT authentication, audit hooks, structured agent state, serverless GPU workers, and explicit separation between orchestration policy and pixel synthesis.
 
+
+
+https://github.com/user-attachments/assets/2c0d4458-3921-4039-83eb-7f7333c9fc3f
+
+
+
+
 ---
 
 ## Table of contents
