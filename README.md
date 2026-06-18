@@ -355,9 +355,7 @@ Full schemas: `backend-service/API_INTEGRATION_SPEC.md`.
 
 ---
 
-## Team
 
-Final Year Project, National University of Science and Technology (NUST), Islamabad.
 
 **Contributors:** Muqaddas Anees, Muqadas Zahra, Eman Chaudhary
 
@@ -365,4 +363,4 @@ Final Year Project, National University of Science and Technology (NUST), Islama
 
 ## License
 
-Academic project repository. Contact the authors for reuse terms.
+Contact the authors for reuse terms.
